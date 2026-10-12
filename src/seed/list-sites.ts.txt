@@ -1,0 +1,7 @@
+// Example snippet: list the sites this login can see.
+//   wf-mcp run ~/.wf-mcp/snippets/list-sites.ts
+export {};
+
+type Site = { id: string; displayName: string; shortName: string };
+const { sites } = await webflow.data_sites_tool.list_sites<{ sites: Site[] }>();
+for (const s of sites) console.log(`${s.id}  ${s.displayName} (${s.shortName})`);

@@ -1,0 +1,113 @@
+// Find a phrase anywhere in the site's content: static page nodes, component content and props,
+// page/site custom code, and every CMS item field.
+//   wf-mcp run ~/.wf-mcp/snippets/find-text.ts <siteId> "<regex>"   (case-insensitive, e.g. "most\\s*popular")
+// Writes hits to out/find-text.json and prints a summary.
+export {};
+
+type Page = { id: string; title: string; slug: string; publishedPath?: string; collectionId?: string; draft?: boolean; archived?: boolean };
+type Paged<K extends string, T> = { [k in K]: T[] } & { pagination?: { total: number } };
+type Collection = { id: string; displayName: string; slug: string };
+type Item = { id: string; isArchived: boolean; isDraft: boolean; lastPublished: string | null; fieldData: Record<string, unknown> & { name: string; slug: string } };
+
+const [siteId, pattern] = args;
+if (!siteId || !pattern) throw new Error('Usage: find-text.ts <siteId> "<regex>"');
+const re = new RegExp(pattern, "i");
+
+type Hit = { source: string; where: string; detail: string; snippet: string; meta?: Record<string, unknown> };
+const hits: Hit[] = [];
+const errors: string[] = [];
+
+function snippetOf(s: string) {
+  const plain = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const m = plain.match(re) ?? s.match(re);
+  const src = plain.match(re) ? plain : s;
+  const at = m?.index ?? 0;
+  return src.slice(Math.max(0, at - 80), at + 120).trim();
+}
+
+// Recursively report every string leaf that matches, with its JSON path.
+function scan(value: unknown, path: string, push: (path: string, s: string) => void) {
+  if (typeof value === "string") {
+    if (re.test(value)) push(path, value);
+  } else if (Array.isArray(value)) value.forEach((v, i) => scan(v, `${path}[${i}]`, push));
+  else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) scan(v, path ? `${path}.${k}` : k, push);
+}
+
+async function all<K extends string, T>(key: K, fetch: (offset: number) => Promise<Paged<K, T>>) {
+  const out: T[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await fetch(offset);
+    const rows = page[key] ?? [];
+    out.push(...rows);
+    if (!rows.length || out.length >= (page.pagination?.total ?? 0)) break;
+  }
+  return out;
+}
+
+// Pages: static content nodes and page custom code.
+const pages = await all("pages", (offset) => webflow.data_pages_tool.list_pages<Paged<"pages", Page>>({ site_id: siteId, limit: 100, offset }));
+console.log(`Pages: ${pages.length}`);
+for (const p of pages) {
+  const where = `${p.title} (${p.publishedPath ?? p.slug})${p.collectionId ? " [CMS template]" : ""}${p.draft ? " [draft]" : ""}${p.archived ? " [archived]" : ""}`;
+  try {
+    const nodes = await all("nodes", (offset) => webflow.data_localization_tool.get_page_content<Paged<"nodes", { id: string }>>({ page_id: p.id, limit: 100, offset }));
+    for (const n of nodes) scan(n, "", (path, s) => hits.push({ source: "page", where, detail: `node ${n.id} ${path}`, snippet: snippetOf(s), meta: { pageId: p.id } }));
+  } catch (e) {
+    errors.push(`page content ${where}: ${String(e).slice(0, 200)}`);
+  }
+  try {
+    const code = await webflow.data_scripts_tool.get_page_freeform_code({ page_id: p.id });
+    scan(code, "", (path, s) => hits.push({ source: "page-code", where, detail: path, snippet: snippetOf(s), meta: { pageId: p.id } }));
+  } catch (e) {
+    errors.push(`page code ${where}: ${String(e).slice(0, 200)}`);
+  }
+}
+
+// Site custom code.
+try {
+  const code = await webflow.data_scripts_tool.get_site_freeform_code({ site_id: siteId });
+  scan(code, "", (path, s) => hits.push({ source: "site-code", where: "Site custom code", detail: path, snippet: snippetOf(s) }));
+} catch (e) {
+  errors.push(`site code: ${String(e).slice(0, 200)}`);
+}
+
+// Components: default content and prop values.
+const components = await all("components", (offset) =>
+  webflow.data_localization_tool.list_components<Paged<"components", { id: string; name: string; group?: string }>>({ site_id: siteId, limit: 100, offset }),
+);
+console.log(`Components: ${components.length}`);
+for (const c of components) {
+  const where = `${c.group ? `${c.group} / ` : ""}${c.name}`;
+  try {
+    const nodes = await all("nodes", (offset) =>
+      webflow.data_localization_tool.get_component_content<Paged<"nodes", { id: string }>>({ site_id: siteId, component_id: c.id, limit: 100, offset }),
+    );
+    for (const n of nodes) scan(n, "", (path, s) => hits.push({ source: "component", where, detail: `node ${n.id} ${path}`, snippet: snippetOf(s), meta: { componentId: c.id } }));
+    const props = await webflow.data_localization_tool.get_component_properties({ site_id: siteId, component_id: c.id, limit: 100 });
+    scan(props, "", (path, s) => hits.push({ source: "component-prop", where, detail: path, snippet: snippetOf(s), meta: { componentId: c.id } }));
+  } catch (e) {
+    errors.push(`component ${where}: ${String(e).slice(0, 200)}`);
+  }
+}
+
+// CMS: every field of every item.
+const { collections } = await webflow.data_cms_tool.get_collection_list<{ collections: Collection[] }>({ siteId });
+for (const c of collections) {
+  const items = await all("items", (offset) => webflow.data_cms_tool.list_collection_items<Paged<"items", Item>>({ collection_id: c.id, request: { limit: 100, offset } }));
+  for (const i of items) {
+    const state = i.isArchived ? "archived" : i.isDraft ? "draft" : i.lastPublished ? "published" : "staged";
+    scan(i.fieldData, "", (path, s) =>
+      hits.push({ source: "cms", where: `${c.displayName} / ${i.fieldData.name} (/${c.slug}/${i.fieldData.slug})`, detail: `field ${path}`, snippet: snippetOf(s), meta: { collectionId: c.id, itemId: i.id, state } }),
+    );
+  }
+}
+
+out.write("find-text.json", JSON.stringify({ pattern, hits, errors }, null, 2));
+console.log(`Hits: ${hits.length}  Errors: ${errors.length}`);
+const bySource = new Map<string, Hit[]>();
+for (const h of hits) bySource.set(`${h.source} | ${h.where}`, [...(bySource.get(`${h.source} | ${h.where}`) ?? []), h]);
+for (const [k, hs] of bySource) {
+  console.log(`\n${k}  (${hs.length})${hs[0].meta?.state ? ` [${hs[0].meta.state}]` : ""}`);
+  for (const h of hs.slice(0, 3)) console.log(`   ${h.detail}: …${h.snippet}…`);
+}
+if (errors.length) console.log(`\nErrors:\n  ${errors.slice(0, 15).join("\n  ")}`);

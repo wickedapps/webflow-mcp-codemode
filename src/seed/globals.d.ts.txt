@@ -1,0 +1,23 @@
+// The globals a snippet gets inside the sandbox (see PRELUDE in sandbox.ts), besides `webflow` from types/webflow.ts.
+// Snippets are typechecked with these and the ES2023 library only, so Node and Bun APIs fail the typecheck.
+export {};
+
+declare global {
+  // Values print as text; objects and arrays as compact JSON. All levels go to the same output.
+  const console: {
+    log(...values: unknown[]): void;
+    info(...values: unknown[]): void;
+    warn(...values: unknown[]): void;
+    error(...values: unknown[]): void;
+    debug(...values: unknown[]): void;
+  };
+  // Arguments after the snippet path: `wf-mcp run ~/.wf-mcp/snippets/x.ts a b` gives ["a", "b"].
+  const args: readonly string[];
+  // Files in out/, the only folder a snippet can reach. Paths are relative to out/.
+  const out: {
+    // Writes text, or other values as pretty JSON, and returns the file's full path.
+    write(name: string, data: unknown): string;
+    read(name: string): string;
+  };
+  function sleep(ms: number): Promise<void>;
+}

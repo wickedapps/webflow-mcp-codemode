@@ -1,0 +1,84 @@
+// Read-only smoke test: one call per Webflow MCP tool, to check that the types, the runner and the login
+// work across the whole tool set. Prints one line per tool; failures are listed, not thrown.
+//   wf-mcp run ~/.wf-mcp/snippets/smoke-test.ts <siteId> [pageId]
+// Some failures are expected: designer_tool and element_snapshot_tool need the site open in the Designer with the
+// MCP Bridge App in the foreground, and the analyze, campaigns and enterprise tools need the matching Webflow plan.
+export {};
+
+const [siteId, pageArg] = args;
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/smoke-test.ts <siteId> [pageId]");
+
+type Page = { id: string; publishedPath?: string; collectionId?: string };
+const { pages } = await webflow.data_pages_tool.list_pages<{ pages: Page[] }>({ site_id: siteId, limit: 100 });
+const home = pages.find((p) => p.publishedPath === "/") ?? pages.find((p) => !p.collectionId) ?? pages[0];
+const pageId = pageArg ?? home.id;
+const tool = { siteId, pageId };
+const day = 24 * 60 * 60 * 1000;
+
+// The first element below Body, for the tools that act on one element.
+type ElementId = { component: string; element: string };
+function firstElementId(value: unknown): ElementId | undefined {
+  if (!value || typeof value !== "object") return;
+  const { id, type } = value as { id?: unknown; type?: string };
+  if (id && typeof id === "object" && "element" in id && type !== "Body") return id as ElementId;
+  for (const child of Object.values(value)) {
+    const found = firstElementId(child);
+    if (found) return found;
+  }
+}
+const elements = await webflow.data_element_tool.get_all_elements({ depth: 2 }, tool);
+const elementId = firstElementId(elements);
+
+const checks: Array<[string, () => Promise<unknown>]> = [
+  ["webflow_guide_tool", () => webflow.webflow_guide_tool()],
+  ["get_more_tools", () => webflow.get_more_tools({ brief: "List CMS tools", category: "CMS" })],
+  ["ask_webflow_ai", () => webflow.ask_webflow_ai({ message: "In one sentence, what is a CMS collection?" })],
+  ["data_sites_tool.get_site", () => webflow.data_sites_tool.get_site({ site_id: siteId })],
+  ["data_pages_tool.list_pages", async () => pages],
+  ["data_cms_tool.get_collection_list", () => webflow.data_cms_tool.get_collection_list({ siteId })],
+  ["data_assets_tool.list_assets", () => webflow.data_assets_tool.list_assets({ site_id: siteId, limit: 5 })],
+  ["data_scripts_tool.get_site_scripts", () => webflow.data_scripts_tool.get_site_scripts({ site_id: siteId })],
+  ["data_forms_tool.list_forms", () => webflow.data_forms_tool.list_forms({ site_id: siteId, limit: 5 })],
+  ["data_webhook_tool.list_webhooks", () => webflow.data_webhook_tool.list_webhooks({ site_id: siteId })],
+  ["data_sitemap_tool.list_pages_sitemap_status", () => webflow.data_sitemap_tool.list_pages_sitemap_status({ site_id: siteId, limit: 5 })],
+  ["data_comments_tool.list_comment_threads", () => webflow.data_comments_tool.list_comment_threads({ site_id: siteId, limit: 5 })],
+  ["data_fonts_tool.list_fonts", () => webflow.data_fonts_tool.list_fonts({ site_id: siteId, limit: 5 })],
+  ["data_localization_tool.get_page_content", () => webflow.data_localization_tool.get_page_content({ page_id: pageId, limit: 5 })],
+  ["data_agent_instructions_tool.search_instructions", () => webflow.data_agent_instructions_tool.search_instructions({ site_id: siteId, limit: 5 })],
+  ["data_apps_tool.list_apps", () => webflow.data_apps_tool.list_apps({ site_id: siteId, limit: 5 })],
+  ["data_campaigns_tool.list_campaigns", () => webflow.data_campaigns_tool.list_campaigns({ site_id: siteId, limit: 5 })],
+  ["data_enterprise_tool.list_301_redirects", () => webflow.data_enterprise_tool.list_301_redirects({ site_id: siteId })],
+  ["data_analyze_tool.get_top_pages_report", () =>
+    webflow.data_analyze_tool.get_top_pages_report({
+      site_id: siteId,
+      startTime: new Date(Date.now() - 7 * day).toISOString(),
+      endTime: new Date().toISOString(),
+      limit: 5,
+    })],
+  ["data_element_tool.get_all_elements", async () => elements],
+  ["data_style_tool.get_styles", () => webflow.data_style_tool.get_styles({ query: "all" }, tool)],
+  ["data_variable_tool.get_variable_collections", () => webflow.data_variable_tool.get_variable_collections({ query: "all" }, tool)],
+  ["data_component_tool.get_all_components", () => webflow.data_component_tool.get_all_components({}, tool)],
+  ["data_interactions_tool.list_interactions", () => webflow.data_interactions_tool.list_interactions({ limit: 5 }, tool)],
+  ["designer_tool.get_current_page", () => webflow.designer_tool.get_current_page(true, { siteId })],
+];
+if (elementId) {
+  checks.push(
+    ["element_snapshot_tool", () => webflow.element_snapshot_tool({ siteId, action: { id: elementId } })],
+    ["data_element_settings_tool.get_settings", () =>
+      webflow.data_element_settings_tool.get_settings({ type: "all_resolved_settings", element_id: elementId }, tool)],
+  );
+}
+
+let failed = 0;
+for (const [name, run] of checks) {
+  try {
+    const value = await run();
+    const size = typeof value === "string" ? value.length : JSON.stringify(value ?? null).length;
+    console.log(`ok    ${name} (${size} chars)`);
+  } catch (err) {
+    failed++;
+    console.log(`fail  ${name}: ${(err as Error).message.split("\n")[0].slice(0, 160)}`);
+  }
+}
+console.log(`\n${checks.length - failed} of ${checks.length} passed on page ${pageId}.${elementId ? "" : " No element ID found, so element tools were skipped."}`);

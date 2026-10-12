@@ -1,0 +1,28 @@
+// Example snippet: snapshot the top-level elements of the page open in the Designer. Read-only.
+// Needs the site open in the Designer with the MCP Bridge App in the foreground tab.
+//   wf-mcp run ~/.wf-mcp/snippets/snapshot.ts <siteId> [count]
+// Each snapshot is saved as a PNG in out/; the paths are printed.
+export {};
+
+const [siteId, count = "2"] = args;
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/snapshot.ts <siteId> [count]");
+
+const page = await webflow.designer_tool.get_current_page<{ id: string; pageName: string }>(true, { siteId });
+console.log(`Designer is on "${page.pageName}" (${page.id}).`);
+
+type Element = { id: { component: string; element: string }; type: string; children?: Element[] };
+const [tree] = await webflow.data_element_tool.get_all_elements<[{ data: Element }]>({ depth: 2 }, { siteId, pageId: page.id });
+// Body's direct children are usually one wrapper, so take the wrapper's children when there is only one.
+let top = tree.data.children ?? [];
+if (top.length === 1 && top[0].children?.length) top = top[0].children;
+
+// Elements with nothing visible (e.g. a "Global Styles" component) fail on Webflow's side with
+// "Invalid tools/call result ... Invalid Base64 string", so a failure is reported and skipped.
+for (const el of top.slice(0, Number(count))) {
+  try {
+    const { images } = await webflow.element_snapshot_tool<{ images: string[] }>({ siteId, action: { id: el.id } });
+    console.log(`${el.type} ${el.id.element}: ${images.join(", ")}`);
+  } catch (err) {
+    console.log(`${el.type} ${el.id.element}: no snapshot (${(err as Error).message.split("\n")[0].slice(0, 100)})`);
+  }
+}

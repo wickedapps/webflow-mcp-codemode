@@ -1,0 +1,9 @@
+.DS_Store
+*.tgz
+src/node_modules/
+src/out/
+# Build outputs. Users install the zip attached to each GitHub release, not files from the repo.
+plugins/webflow-codemode.zip
+plugins/webflow-codemode/scripts/wf-mcp-darwin-arm64
+plugins/webflow-codemode/scripts/typescript-darwin-arm64/
+plugins/webflow-codemode/scripts/.checked

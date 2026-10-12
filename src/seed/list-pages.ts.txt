@@ -1,0 +1,21 @@
+// Example snippet: list a site's pages, with their paths. CMS template pages, drafts and archived pages are marked.
+//   wf-mcp run ~/.wf-mcp/snippets/list-pages.ts <siteId>
+export {};
+
+const [siteId] = args;
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/list-pages.ts <siteId>");
+
+type Page = { id: string; title: string; slug: string; publishedPath?: string; collectionId?: string; draft?: boolean; archived?: boolean };
+type Paged = { pages: Page[]; pagination?: { total: number } };
+
+const pages: Page[] = [];
+for (let offset = 0; ; offset += 100) {
+  const page = await webflow.data_pages_tool.list_pages<Paged>({ site_id: siteId, limit: 100, offset });
+  pages.push(...(page.pages ?? []));
+  if (!page.pages?.length || pages.length >= (page.pagination?.total ?? 0)) break;
+}
+console.log(`${pages.length} pages`);
+for (const p of pages) {
+  const marks = [p.collectionId && "CMS template", p.draft && "draft", p.archived && "archived"].filter(Boolean);
+  console.log(`${p.id}  ${p.title}  ${p.publishedPath ?? `/${p.slug}`}${marks.length ? `  [${marks.join(", ")}]` : ""}`);
+}

@@ -1,0 +1,4 @@
+[install]
+# Supply-chain guard: never resolve a package version published less than 24 hours ago (seconds).
+minimumReleaseAge = 86400
+exact = true

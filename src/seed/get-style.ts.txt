@@ -1,0 +1,17 @@
+// Read one style through the sandboxed codemode runner.
+//   wf-mcp run ~/.wf-mcp/snippets/get-style.ts <siteId> [styleName]
+export {};
+
+const [siteId, styleName = "button"] = args;
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/get-style.ts <siteId> [styleName]");
+
+type Page = { id: string; title?: string; publishedPath?: string; collectionId?: string | null };
+const { pages } = await webflow.data_pages_tool.list_pages<{ pages: Page[] }>({ site_id: siteId, limit: 100 });
+const page = pages.find((item) => item.publishedPath === "/") ?? pages.find((item) => !item.collectionId);
+if (!page) throw new Error("No site page found for the style request.");
+
+console.log(JSON.stringify({ siteId, pageId: page.id, pageTitle: page.title, styleName }));
+const result = await webflow.data_style_tool.query_styles({
+  queries: [{ name_path: [styleName], include_properties: true, limit: 1 }],
+}, { siteId, pageId: page.id });
+console.log(JSON.stringify(result, null, 2));

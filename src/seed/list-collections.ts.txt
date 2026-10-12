@@ -1,0 +1,17 @@
+// Example snippet: list a site's CMS collections, with how many items each holds.
+//   wf-mcp run ~/.wf-mcp/snippets/list-collections.ts <siteId>
+export {};
+
+const [siteId] = args;
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/list-collections.ts <siteId>");
+
+type Collection = { id: string; displayName: string; slug: string };
+type Items = { items: unknown[]; pagination?: { total: number } };
+
+const { collections } = await webflow.data_cms_tool.get_collection_list<{ collections: Collection[] }>({ siteId });
+console.log(`${collections.length} collections`);
+// One item is enough to read the total from the pagination.
+const totals = await Promise.all(
+  collections.map((c) => webflow.data_cms_tool.list_collection_items<Items>({ collection_id: c.id, request: { limit: 1 } })),
+);
+collections.forEach((c, i) => console.log(`${c.id}  ${c.displayName} (/${c.slug})  ${totals[i].pagination?.total ?? "?"} items`));
