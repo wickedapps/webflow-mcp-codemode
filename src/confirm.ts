@@ -11,6 +11,8 @@ export interface ConfirmRequest {
   name: string;
   access: string;
   site?: string;
+  // The site's display name, when it could be looked up.
+  siteName?: string;
   input: unknown;
   // Offer "Always allow" for this action on this site. Off for destructive actions.
   canRemember?: boolean;
@@ -24,7 +26,6 @@ export interface ConfirmAnswer {
 }
 
 const DIALOG_SECONDS = 120;
-const INPUT_PREVIEW = 400;
 
 // The message and button list are passed as arguments, never spliced into the script, so snippet input can't
 // inject AppleScript. Buttons are separated by "|".
@@ -36,19 +37,74 @@ const DIALOG_SCRIPT = `on run argv
   return button returned of reply
 end run`;
 
+const UPPER = new Set(["cms", "seo", "aeo", "ai", "url", "html", "whtml", "css", "dom", "id"]);
+// Tool areas that the action's own words don't name, so they're added after the verb.
+const AREAS: Record<string, string> = {
+  cms: "cms",
+  apps: "app",
+  campaigns: "campaign",
+  localization: "localization",
+  comments: "comment",
+  element: "element",
+  element_settings: "element",
+};
+
+const words = (s: string) => s.split("_").filter(Boolean);
+const phrase = (ws: string[]) =>
+  ws
+    .map((w) => (UPPER.has(w) ? w.toUpperCase() : w))
+    .join(" ")
+    .replace("robots txt", "robots.txt");
+
+// "data_cms_tool.update_collection_items" -> verb "update", object "CMS items".
+export function actionWords(name: string): { verb: string; object: string; noun?: string } {
+  const [tool, action] = name.split(".");
+  const area = words(tool).filter((w) => w !== "data" && w !== "tool").join("_");
+  if (!action) return { verb: "use", object: phrase(words(area)) };
+  let ws = words(action);
+  if (ws[0] === "bulk" || ws[0] === "batch") ws = ws.slice(1);
+  if (ws[0] === "unlink" && ws[1] === "delete") ws = ["unlink and delete", ...ws.slice(2)];
+  const [verb, ...rest] = ws;
+  let object = rest;
+  // CMS actions say "collection" before what they change: collection items are CMS items.
+  if (area === "cms" && object[0] === "collection" && object.length > 1) object = object.slice(1);
+  const extra = AREAS[area];
+  if (extra && !object.some((w) => w.startsWith(extra))) object = [extra, ...object];
+  return { verb, object: phrase(object), noun: rest.at(-1) };
+}
+
+const thirdPerson = (verb: string) => (/(s|sh|ch|x)$/.test(verb) ? `${verb}es` : `${verb}s`);
+
+// How many things this call changes: the length of the array named after the action's last word (`items` for
+// update_collection_items, `pages` for bulk_update_pages), within the first few levels of the input.
+export function changeCount(input: unknown, noun: string | undefined): number | undefined {
+  if (!noun?.endsWith("s")) return;
+  const search = (value: unknown, depth: number): number | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value) || depth > 3) return;
+    const found = (value as Record<string, unknown>)[noun];
+    if (Array.isArray(found)) return found.length;
+    for (const v of Object.values(value)) {
+      const n = search(v, depth + 1);
+      if (n !== undefined) return n;
+    }
+  };
+  return search(input, 0);
+}
+
 export function describe(req: ConfirmRequest): string {
-  let input = JSON.stringify(req.input) ?? "";
-  if (input.length > INPUT_PREVIEW) input = `${input.slice(0, INPUT_PREVIEW)}… (${input.length} characters)`;
+  const { verb, object, noun } = actionWords(req.name);
+  const what = `${verb} ${object}`;
+  const site = req.siteName ?? req.site;
+  const here = site ? " on this site" : "";
+  const count = changeCount(req.input, noun);
+  const unit = count === 1 ? noun!.slice(0, -1) : noun;
   return [
-    `The snippet ${req.snippet} wants to make a ${req.access} call:`,
+    `${req.snippet} wants to ${what}${site ? ` on ${site}` : ""}.`,
     "",
-    req.name,
-    ...(req.site ? [`Site: ${req.site}`] : []),
-    `Input: ${input}`,
-    "",
+    ...(count !== undefined ? [`This call ${thirdPerson(verb)} ${count} ${unit}.`] : []),
     req.canRemember
-      ? `Allow this action for this run, or always${req.site ? " on this site" : ""} (for ${APPROVAL_DAYS} days)? Nothing is sent until you choose. Deny if you didn't expect it.`
-      : "Allow this action for the rest of this run? Nothing is sent until you choose. Deny if you didn't expect it.",
+      ? `Allow this run lets this snippet ${what}${here} until it finishes. Always allow lets any snippet do it for ${APPROVAL_DAYS} days.`
+      : `Allow lets this snippet ${what}${here} until it finishes.`,
   ].join("\n");
 }
 

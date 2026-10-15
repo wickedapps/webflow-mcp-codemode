@@ -154,6 +154,11 @@ if (!opts["no-check"] && tsc) {
 
 const counts: Record<Access | "blocked", number> = { read: 0, sensitive: 0, write: 0, destructive: 0, blocked: 0 };
 let firstCall: Promise<CallOutput> | undefined;
+// The first call gets the session ID issued; later calls reuse it, so they wait for the first one.
+function inOrder(exec: () => Promise<CallOutput>): Promise<CallOutput> {
+  if (!firstCall) return (firstCall = exec());
+  return firstCall.catch(() => {}).then(exec);
+}
 
 // Most inputs are objects; a few designer_tool actions take `true`.
 type Request = { tool: string; action: string | null; input: unknown; toolArgs: Record<string, unknown> };
@@ -177,6 +182,20 @@ function resolve(req: Request): { name: string; access: Access; args: Record<str
 // a time. Write and sensitive actions the user chose to always allow (trust.ts) skip the prompt.
 const approvals = new Map<string, Promise<{ ok: boolean; how: string }>>();
 const askOne = limiter(1);
+
+// Site names for the approval prompt, listed once per run when the first prompt needs one. A failed lookup
+// leaves the prompt showing the site ID.
+let siteNames: Promise<Map<string, string>> | undefined;
+async function siteName(id: string): Promise<string | undefined> {
+  siteNames ??= inOrder(() => limit(() => callOutput(mcp, "data_sites_tool", { actions: [{ label: "sites", list_sites: {} }] })))
+    .then(({ text }) => {
+      const result = unwrap("data_sites_tool.list_sites", text) as { sites?: Array<{ id: string; displayName: string }> };
+      return new Map((result?.sites ?? []).map((s) => [s.id, s.displayName]));
+    })
+    .catch(() => new Map());
+  return (await siteNames).get(id);
+}
+
 function approve(name: string, access: Access, req: Request): Promise<{ ok: boolean; how: string }> {
   const input = req.input as Record<string, unknown> | undefined;
   const site = [req.toolArgs?.siteId, req.toolArgs?.site_id, input?.siteId, input?.site_id].find((v) => typeof v === "string") as
@@ -189,7 +208,15 @@ function approve(name: string, access: Access, req: Request): Promise<{ ok: bool
       if (isRemembered(name, site, access)) return { ok: true, how: `always allowed for ${APPROVAL_DAYS} days; \`wf-mcp approvals --clear\` revokes it` };
       hold();
       try {
-        const answer = await confirmCall({ snippet: path.basename(snippet), name, access, site, input: req.input, canRemember: rememberable(access) });
+        const answer = await confirmCall({
+          snippet: path.basename(snippet),
+          name,
+          access,
+          site,
+          siteName: site && (await siteName(site)),
+          input: req.input,
+          canRemember: rememberable(access),
+        });
         if (answer.remember) remember(name, site, access);
         const scope = answer.remember ? `for ${APPROVAL_DAYS} days${site ? ` on site ${site}` : ""}` : "for this run";
         console.error(`[wf-mcp] ${answer.ok ? "Allowed" : "Denied"} ${name} ${scope} (${answer.how}).`);
@@ -218,16 +245,9 @@ async function handle(req: Request): Promise<unknown> {
   }
   counts[access]++;
 
-  // The first call gets the session ID issued; later calls reuse it, so they wait for the first one.
   // Reads are retried on 429. Writes are not, since a tool may have applied part of the change already.
   // At most --concurrency calls run at once; a call waiting out a rate limit keeps its slot.
-  const exec = () => limit(() => callOutput(mcp, req.tool, args, mcp.context, { retryRateLimit: access === "read" }));
-  let output: CallOutput;
-  if (!firstCall) output = await (firstCall = exec());
-  else {
-    await firstCall.catch(() => {});
-    output = await exec();
-  }
+  const output = await inOrder(() => limit(() => callOutput(mcp, req.tool, args, mcp.context, { retryRateLimit: access === "read" })));
   const { text } = output;
   const value = req.action ? unwrap(name, text) : parseMaybe(text);
   if (!output.images.length) return value;
