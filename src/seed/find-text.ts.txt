@@ -1,6 +1,6 @@
 // Find a phrase anywhere in the site's content: static page nodes, component content and props,
 // page/site custom code, and every CMS item field.
-//   wf-mcp run ~/.wf-mcp/snippets/find-text.ts <siteId> "<regex>"   (case-insensitive, e.g. "most\\s*popular")
+//   wf-mcp run ~/.wf-mcp/snippets/examples/find-text.ts <siteId> "<regex>"   (case-insensitive, e.g. "most\\s*popular")
 // Writes hits to out/find-text.json and prints a summary.
 export {};
 

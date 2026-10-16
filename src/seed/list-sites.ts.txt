@@ -1,5 +1,5 @@
 // Example snippet: list the sites this login can see.
-//   wf-mcp run ~/.wf-mcp/snippets/list-sites.ts
+//   wf-mcp run ~/.wf-mcp/snippets/examples/list-sites.ts
 export {};
 
 type Site = { id: string; displayName: string; shortName: string };

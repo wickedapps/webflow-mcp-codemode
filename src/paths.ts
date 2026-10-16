@@ -63,6 +63,8 @@ export const APPROVALS_FILE = path.join(HOME, "approvals.json");
 export const TYPES_DIR = path.join(HOME, "types");
 export const OUT_DIR = path.join(HOME, "out");
 export const SNIPPETS_DIR = path.join(HOME, "snippets");
+// The plugin's example snippets, rewritten to match the binary (home.ts). The rest of snippets/ is the user's.
+export const EXAMPLES_DIR = path.join(SNIPPETS_DIR, "examples");
 // Typechecking support files, written by ensureHome(): the sandbox's globals and the snippets' tsconfig.
 export const SUPPORT_DIR = path.join(HOME, "support");
 

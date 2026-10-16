@@ -56,6 +56,12 @@ Your Webflow login is kept in the macOS Keychain, the way Claude Code keeps its 
 
 To give one project its own Webflow login (say, a different client workspace), type `/webflow-codemode:login project` in it. That creates `.wf-mcp/` at the project root (the git root if there is one), and any run from inside that project uses it instead of `~/.wf-mcp/`. The folder ignores itself in git, and `init` signs it with a key only you have, so a `.wf-mcp/` folder that arrives with a repo or a zip isn't used until you adopt it with `/webflow-codemode:login project` (which deletes any login, approvals and types it came with). The lookup order is `$WF_MCP_HOME`, then the nearest `.wf-mcp/` in the current folder or a parent, then `~/.wf-mcp/`. `/webflow-codemode:status` shows the one in use.
 
+## Saved snippets
+
+When Claude writes a snippet for a task that may come up again, it saves it in the home folder's `snippets/` with a comment saying what it does and how to run it. Later sessions run `wf-mcp snippets` first and reuse a saved one when it fits, instead of writing it again. One-off snippets go in `snippets/scratch/`, which isn't listed. Because each project login has its own home folder, a project's saved snippets stay with that project.
+
+The plugin's own examples are in `snippets/examples/` and are replaced on every update, so copy one out before changing it.
+
 ## Development
 
 You need [Bun](https://bun.sh) 1.3 or later on an Apple silicon Mac.
@@ -98,7 +104,7 @@ bun run audit:ages       # check that every locked package is at least 24 hours 
 
 ### How it works
 
-- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `approvals` and `home`.
+- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `types`, `snippets`, `approvals` and `home`. `types <tool>.<action>` prints one action's docs from `types/` (`src/type-docs.ts`), so Claude doesn't read a whole tool's file; `snippets` lists saved snippets and examples with their header comments (`src/snippets.ts`).
 - The login lives in the macOS Keychain: a generic password with service `wf-mcp` and the home's path as the account, plus `<path>#previous` for the login before it (`src/credentials.ts`). It's written through `security -i` on stdin so tokens never show in a process list.
 - Other state lives in a home folder (`approvals.json`, `types/`, `snippets/`, `out/`, `support/`): a project's own `.wf-mcp/` if it has one, else `~/.wf-mcp/` (`src/paths.ts`).
 - Each call's access level comes from the access table compiled into the binary (`buildManifest` in `src/gen-types.ts`), never from `types/manifest.json` on disk.
@@ -106,7 +112,7 @@ bun run audit:ages       # check that every locked package is at least 24 hours 
 - `logout` and `login --force` revoke the login they discard at Webflow's revocation endpoint, then try its refresh token once to confirm it's dead (`src/revoke.ts`).
 - Write and sensitive actions can be always allowed per action and site for 7 days (`src/trust.ts`); destructive ones can't. An agent with shell access could edit `approvals.json`, or read the Keychain item with `security` (items it created don't prompt), so the dialog stops mistakes, not a determined agent.
 - Snippets have no network. To finish `create_asset`, `create_font` or `replace_font_file`, a snippet hands the runner a file in `out/` and that call's presigned S3 target (`out.upload`); the runner sends it only to a target one of those calls returned in the same run, and only to Amazon S3 over https (`src/upload.ts`).
-- The QuickJS wasm, the sandbox globals and the example snippets are embedded in the binary. The TypeScript compiler ships beside it, and without the compiler snippets run unchecked.
+- The QuickJS wasm, the sandbox globals and the example snippets are embedded in the binary. The examples are rewritten into `snippets/examples/` on every run; the rest of `snippets/` is never touched (`src/home.ts`). The TypeScript compiler ships beside it, and without the compiler snippets run unchecked.
 - The access table is compiled in. When Webflow adds actions, their levels are guessed from the action names (writes and destructive calls still need approval). Review them with `bun dev gen`, add any needed overrides to `src/access.ts`, then rebuild.
 - The launcher refuses anything but an Apple silicon Mac. The first time it runs after an install or update, it checks that macOS lets the binary start (restoring the executable bits if unzipping dropped them), and records the check in `scripts/.checked`. It sets `WF_MCP_PLUGIN=1`, so the binary's messages name slash commands like `/webflow-codemode:login` instead of `wf-mcp login`, which plugin users don't have on their PATH (`src/plugin.ts`).
 

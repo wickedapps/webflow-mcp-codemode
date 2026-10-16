@@ -16,7 +16,7 @@ const NEXT_STEPS = [
   "What to expect:",
   IN_PLUGIN
     ? '- Ask Claude for something on the site, for example "list the CMS collections".'
-    : `- Run a snippet: wf-mcp run ${HOME}/snippets/list-sites.ts`,
+    : `- Run a snippet: wf-mcp run ${HOME}/snippets/examples/list-sites.ts`,
   "- Reads run without asking. Creates, updates, deletes, publishes and reads of personal data (form submissions,",
   "  emails, logs) open a macOS dialog first. Deny is the default; nothing is sent until you choose.",
   "- Designer actions and element snapshots need the site open in the Webflow Designer, with the Webflow MCP Bridge",

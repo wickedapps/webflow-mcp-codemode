@@ -1,9 +1,9 @@
 // Read one style through the sandboxed codemode runner.
-//   wf-mcp run ~/.wf-mcp/snippets/get-style.ts <siteId> [styleName]
+//   wf-mcp run ~/.wf-mcp/snippets/examples/get-style.ts <siteId> [styleName]
 export {};
 
 const [siteId, styleName = "button"] = args;
-if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/get-style.ts <siteId> [styleName]");
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/examples/get-style.ts <siteId> [styleName]");
 
 type Page = { id: string; title?: string; publishedPath?: string; collectionId?: string | null };
 const { pages } = await webflow.data_pages_tool.list_pages<{ pages: Page[] }>({ site_id: siteId, limit: 100 });

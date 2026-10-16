@@ -1,9 +1,9 @@
 // Example snippet: list a site's CMS collections, with how many items each holds.
-//   wf-mcp run ~/.wf-mcp/snippets/list-collections.ts <siteId>
+//   wf-mcp run ~/.wf-mcp/snippets/examples/list-collections.ts <siteId>
 export {};
 
 const [siteId] = args;
-if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/list-collections.ts <siteId>");
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/examples/list-collections.ts <siteId>");
 
 type Collection = { id: string; displayName: string; slug: string };
 type Items = { items: unknown[]; pagination?: { total: number } };

@@ -10,7 +10,7 @@ allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/wf-mcp --version *) Bash(${CLA
 `wf-mcp` below means `${CLAUDE_PLUGIN_ROOT}/scripts/wf-mcp`; always use the full path, from the project's directory. Everything here is read-only. Run each `wf-mcp` command as its own Bash call, written out in full: no shell variables, `;`, `&&`, pipes, `echo` or `$?`. Only a plain command matches the ones this skill pre-approves; anything else makes the user approve it. A failing command's exit code is reported anyway.
 
 1. Run `wf-mcp --version` and `wf-mcp home --verbose`.
-2. Run `wf-mcp run <home>/snippets/list-sites.ts`, where `<home>` is the folder `home` printed, with a Bash timeout of 2 minutes.
+2. Run `wf-mcp run <home>/snippets/examples/list-sites.ts`, where `<home>` is the folder `home` printed, with a Bash timeout of 2 minutes.
    - Exit 3: not logged in for this home.
    - Exit 5: the project has a `.wf-mcp/` folder this user didn't set up on this machine; it isn't used until adopted with `/webflow-codemode:login project`.
 3. Run `wf-mcp approvals`.

@@ -4,13 +4,15 @@
 //   wf-mcp logout                   revoke this home's login at Webflow and delete it from the Keychain
 //   wf-mcp run <snippet.ts> [...]   run a snippet in the sandbox (see run.ts for its flags)
 //   wf-mcp gen                      regenerate types/ from Webflow's tool schemas
+//   wf-mcp types <tool>[.<action>]  print one action's inputs from types/, or a tool's actions
+//   wf-mcp snippets                 list saved and example snippets with their header comments
 //   wf-mcp approvals [--clear [name]]  list, or revoke, the actions the user chose to always allow
 //   wf-mcp home                     print the home folder in use: the login, approvals, types/, snippets/ and out/
 import { ensureHome } from "./home.ts";
 import { HOME, HOME_SOURCE, HOME_TRUSTED } from "./paths.ts";
 import { howToRun } from "./plugin.ts";
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const USAGE = `wf-mcp ${VERSION}: run TypeScript snippets against Webflow's MCP server.
 
   wf-mcp init [dir]              Give this project its own login: creates .wf-mcp/ at the project root.
@@ -19,6 +21,8 @@ const USAGE = `wf-mcp ${VERSION}: run TypeScript snippets against Webflow's MCP 
   wf-mcp run <snippet.ts> [args] Run a snippet. Flags: --allow sensitive,write,destructive, --timeout 90,
                                  --max-output 20000, --concurrency 4, --no-check, --login, --context "..."
   wf-mcp gen                     Regenerate the tool types.
+  wf-mcp types <tool>[.<action>] Print one action's inputs and docs, or a tool's actions.
+  wf-mcp snippets                List saved snippets and the plugin's examples, with what each does.
   wf-mcp approvals [--clear [x]] List the write and sensitive actions you chose to always allow, or revoke
                                  them all (or only action x).
   wf-mcp home                    Print the home folder in use (now ${HOME}).
@@ -65,6 +69,26 @@ switch (command) {
     const { generate } = await import("./gen-types.ts");
     await generate();
     process.exit(0);
+  }
+  case "snippets": {
+    const { printSnippets } = await import("./snippets.ts");
+    printSnippets();
+    break;
+  }
+  case "types": {
+    const { describeType } = await import("./type-docs.ts");
+    const names = process.argv.slice(2);
+    if (!names.length) {
+      console.error("Usage: wf-mcp types <tool>[.<action>] ...");
+      process.exit(2);
+    }
+    let failed = false;
+    for (const name of names) {
+      const { ok, text } = describeType(name);
+      (ok ? console.log : console.error)(text + "\n");
+      failed ||= !ok;
+    }
+    process.exit(failed ? 2 : 0);
   }
   case "approvals": {
     const { APPROVAL_DAYS, clearApprovals, expiresAt, listApprovals } = await import("./trust.ts");

@@ -1,6 +1,6 @@
 // Set up the runner's home folder (paths.ts) on first use: the files snippets are typechecked with, and the
-// example snippets. They're embedded in the binary, so the support files are rewritten on every run to match
-// it, while snippets are only added when missing, so a user's edits survive.
+// example snippets in snippets/examples/. They're embedded in the binary and rewritten on every run to match it.
+// The rest of snippets/ holds the user's and earlier sessions' snippets, which are never touched.
 import fs from "node:fs";
 import path from "node:path";
 import globals from "./seed/globals.d.ts.txt" with { type: "text" };
@@ -11,7 +11,7 @@ import listPages from "./seed/list-pages.ts.txt" with { type: "text" };
 import listSites from "./seed/list-sites.ts.txt" with { type: "text" };
 import smokeTest from "./seed/smoke-test.ts.txt" with { type: "text" };
 import snapshot from "./seed/snapshot.ts.txt" with { type: "text" };
-import { HOME, OUT_DIR, SNIPPETS_DIR, SUPPORT_DIR, TYPES_DIR } from "./paths.ts";
+import { EXAMPLES_DIR, HOME, OUT_DIR, SNIPPETS_DIR, SUPPORT_DIR, TYPES_DIR } from "./paths.ts";
 
 // Snippets are checked with the ES2023 library and the sandbox's globals only, so Node and Bun APIs fail.
 const COMPILER_OPTIONS = {
@@ -58,8 +58,11 @@ export function ensureHome(): void {
       2,
     ) + "\n",
   );
+  fs.mkdirSync(EXAMPLES_DIR, { recursive: true });
   for (const [name, text] of Object.entries(SNIPPETS)) {
-    const file = path.join(SNIPPETS_DIR, name);
-    if (!fs.existsSync(file)) fs.writeFileSync(file, text);
+    writeIfChanged(path.join(EXAMPLES_DIR, name), text);
+    // Earlier versions put the examples at the top of snippets/. Remove those copies, unless they were edited.
+    const old = path.join(SNIPPETS_DIR, name);
+    if (fs.existsSync(old) && fs.readFileSync(old, "utf8") === text.replaceAll("/snippets/examples/", "/snippets/")) fs.rmSync(old);
   }
 }

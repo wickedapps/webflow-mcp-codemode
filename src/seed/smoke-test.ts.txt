@@ -1,12 +1,12 @@
 // Read-only smoke test: one call per Webflow MCP tool, to check that the types, the runner and the login
 // work across the whole tool set. Prints one line per tool; failures are listed, not thrown.
-//   wf-mcp run ~/.wf-mcp/snippets/smoke-test.ts <siteId> [pageId]
+//   wf-mcp run ~/.wf-mcp/snippets/examples/smoke-test.ts <siteId> [pageId]
 // Some failures are expected: designer_tool and element_snapshot_tool need the site open in the Designer with the
 // MCP Bridge App in the foreground, and the analyze, campaigns and enterprise tools need the matching Webflow plan.
 export {};
 
 const [siteId, pageArg] = args;
-if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/smoke-test.ts <siteId> [pageId]");
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/examples/smoke-test.ts <siteId> [pageId]");
 
 type Page = { id: string; publishedPath?: string; collectionId?: string };
 const { pages } = await webflow.data_pages_tool.list_pages<{ pages: Page[] }>({ site_id: siteId, limit: 100 });

@@ -40,9 +40,9 @@ Offer a first read with AskUserQuestion. Use the site names from the login outpu
 - **List all CMS collections** on the site, with item counts.
 
 Run the one they pick with a Bash timeout of 2 minutes, where `<home>` is the folder `home` printed and `<siteId>` is the site's ID from the login output:
-- `wf-mcp run <home>/snippets/list-sites.ts`
-- `wf-mcp run <home>/snippets/list-pages.ts <siteId>`
-- `wf-mcp run <home>/snippets/list-collections.ts <siteId>`
+- `wf-mcp run <home>/snippets/examples/list-sites.ts`
+- `wf-mcp run <home>/snippets/examples/list-pages.ts <siteId>`
+- `wf-mcp run <home>/snippets/examples/list-collections.ts <siteId>`
 
 Summarize the result readably (a short table or list, not the raw IDs unless they're useful). If a run exits with code 3, the login didn't take: suggest `/webflow-codemode:login`.
 

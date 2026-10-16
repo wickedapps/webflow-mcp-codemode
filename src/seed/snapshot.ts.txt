@@ -1,11 +1,11 @@
 // Example snippet: snapshot the top-level elements of the page open in the Designer. Read-only.
 // Needs the site open in the Designer with the MCP Bridge App in the foreground tab.
-//   wf-mcp run ~/.wf-mcp/snippets/snapshot.ts <siteId> [count]
+//   wf-mcp run ~/.wf-mcp/snippets/examples/snapshot.ts <siteId> [count]
 // Each snapshot is saved as a PNG in out/; the paths are printed.
 export {};
 
 const [siteId, count = "2"] = args;
-if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/snapshot.ts <siteId> [count]");
+if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/examples/snapshot.ts <siteId> [count]");
 
 const page = await webflow.designer_tool.get_current_page<{ id: string; pageName: string }>(true, { siteId });
 console.log(`Designer is on "${page.pageName}" (${page.id}).`);
