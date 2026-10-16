@@ -14,4 +14,4 @@ console.log(`${collections.length} collections`);
 const totals = await Promise.all(
   collections.map((c) => webflow.data_cms_tool.list_collection_items<Items>({ collection_id: c.id, request: { limit: 1 } })),
 );
-collections.forEach((c, i) => console.log(`${c.id}  ${c.displayName} (/${c.slug})  ${totals[i].pagination?.total ?? "?"} items`));
+collections.forEach((c, i) => console.log(`${c.id}  ${c.displayName} (/${c.slug})  ${totals[i]?.pagination?.total ?? "?"} items`));

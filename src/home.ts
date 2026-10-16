@@ -20,6 +20,10 @@ const COMPILER_OPTIONS = {
   module: "esnext",
   moduleResolution: "bundler",
   strict: true,
+  // A missing array element or record key is a possible undefined, so it can't slip into a write unnoticed.
+  noUncheckedIndexedAccess: true,
+  noImplicitReturns: true,
+  noFallthroughCasesInSwitch: true,
   noEmit: true,
   allowImportingTsExtensions: true,
   erasableSyntaxOnly: true,

@@ -3,6 +3,7 @@
 //   wf-mcp run ~/.wf-mcp/snippets/examples/smoke-test.ts <siteId> [pageId]
 // Some failures are expected: designer_tool and element_snapshot_tool need the site open in the Designer with the
 // MCP Bridge App in the foreground, and the analyze, campaigns and enterprise tools need the matching Webflow plan.
+// get_more_tools is left out: it sends a description of the task to Webflow's team.
 export {};
 
 const [siteId, pageArg] = args;
@@ -11,27 +12,30 @@ if (!siteId) throw new Error("Usage: wf-mcp run ~/.wf-mcp/snippets/examples/smok
 type Page = { id: string; publishedPath?: string; collectionId?: string };
 const { pages } = await webflow.data_pages_tool.list_pages<{ pages: Page[] }>({ site_id: siteId, limit: 100 });
 const home = pages.find((p) => p.publishedPath === "/") ?? pages.find((p) => !p.collectionId) ?? pages[0];
-const pageId = pageArg ?? home.id;
+const pageId = pageArg ?? home?.id;
+if (!pageId) throw new Error("The site has no pages; pass a pageId.");
 const tool = { siteId, pageId };
 const day = 24 * 60 * 60 * 1000;
 
 // The first element below Body, for the tools that act on one element.
 type ElementId = { component: string; element: string };
+const isElementId = (v: unknown): v is ElementId =>
+  !!v && typeof v === "object" && "component" in v && typeof v.component === "string" && "element" in v && typeof v.element === "string";
 function firstElementId(value: unknown): ElementId | undefined {
-  if (!value || typeof value !== "object") return;
-  const { id, type } = value as { id?: unknown; type?: string };
-  if (id && typeof id === "object" && "element" in id && type !== "Body") return id as ElementId;
+  if (!value || typeof value !== "object") return undefined;
+  const isBody = "type" in value && value.type === "Body";
+  if ("id" in value && isElementId(value.id) && !isBody) return value.id;
   for (const child of Object.values(value)) {
     const found = firstElementId(child);
     if (found) return found;
   }
+  return undefined;
 }
 const elements = await webflow.data_element_tool.get_all_elements({ depth: 2 }, tool);
 const elementId = firstElementId(elements);
 
 const checks: Array<[string, () => Promise<unknown>]> = [
   ["webflow_guide_tool", () => webflow.webflow_guide_tool()],
-  ["get_more_tools", () => webflow.get_more_tools({ brief: "List CMS tools", category: "CMS" })],
   ["ask_webflow_ai", () => webflow.ask_webflow_ai({ message: "In one sentence, what is a CMS collection?" })],
   ["data_sites_tool.get_site", () => webflow.data_sites_tool.get_site({ site_id: siteId })],
   ["data_pages_tool.list_pages", async () => pages],
@@ -78,7 +82,8 @@ for (const [name, run] of checks) {
     console.log(`ok    ${name} (${size} chars)`);
   } catch (err) {
     failed++;
-    console.log(`fail  ${name}: ${(err as Error).message.split("\n")[0].slice(0, 160)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`fail  ${name}: ${(message.split("\n")[0] ?? "").slice(0, 160)}`);
   }
 }
 console.log(`\n${checks.length - failed} of ${checks.length} passed on page ${pageId}.${elementId ? "" : " No element ID found, so element tools were skipped."}`);

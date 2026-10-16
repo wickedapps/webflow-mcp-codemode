@@ -107,7 +107,8 @@ console.log(`Hits: ${hits.length}  Errors: ${errors.length}`);
 const bySource = new Map<string, Hit[]>();
 for (const h of hits) bySource.set(`${h.source} | ${h.where}`, [...(bySource.get(`${h.source} | ${h.where}`) ?? []), h]);
 for (const [k, hs] of bySource) {
-  console.log(`\n${k}  (${hs.length})${hs[0].meta?.state ? ` [${hs[0].meta.state}]` : ""}`);
+  const state = hs[0]?.meta?.state;
+  console.log(`\n${k}  (${hs.length})${state ? ` [${state}]` : ""}`);
   for (const h of hs.slice(0, 3)) console.log(`   ${h.detail}: …${h.snippet}…`);
 }
 if (errors.length) console.log(`\nErrors:\n  ${errors.slice(0, 15).join("\n  ")}`);
