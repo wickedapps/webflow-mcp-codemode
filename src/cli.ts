@@ -12,7 +12,7 @@ import { ensureHome } from "./home.ts";
 import { HOME, HOME_SOURCE, HOME_TRUSTED } from "./paths.ts";
 import { howToRun } from "./plugin.ts";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const USAGE = `wf-mcp ${VERSION}: run TypeScript snippets against Webflow's MCP server.
 
   wf-mcp init [dir]              Give this project its own login: creates .wf-mcp/ at the project root.

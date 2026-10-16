@@ -13,12 +13,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { ACCESS_LEVELS, parseAllow, type Access } from "./access.ts";
-import { LoginRequiredError, callOutput, connect, type CallOutput, type WebflowMcp } from "./client.ts";
+import { LoginRequiredError, callOutput, connect, type WebflowMcp } from "./client.ts";
 import { confirmCall } from "./confirm.ts";
 import { errorMessage } from "./errors.ts";
 import { buildManifest, diffManifests, readManifest, staleTypes, writeTypes, type Manifest } from "./gen-types.ts";
-import { limiter, longOutputNote, truncateMiddle } from "./limits.ts";
+import { RateGate, limiter, longOutputNote, truncateMiddle } from "./limits.ts";
 import { OUT_DIR, SUPPORT_DIR, TYPES_DIR, tscPath } from "./paths.ts";
+import { merge, saveShapes, shapeOf, type Shape } from "./shapes.ts";
 import { APPROVAL_DAYS, isRemembered, remember, rememberable } from "./trust.ts";
 import { bundleSnippet, runSandboxed } from "./sandbox/sandbox.ts";
 import { UploadTargets } from "./upload.ts";
@@ -55,7 +56,9 @@ try {
   fail(errorMessage(err));
 }
 const maxOutput = Number(opts["max-output"]);
-const limit = limiter(Math.max(1, Number(opts.concurrency) || 1));
+const concurrency = Math.max(1, Number(opts.concurrency) || 1);
+// Up to --concurrency calls at once, fewer while Webflow is rate limiting the run (RateGate).
+const limit = limiter(() => mcp.rateGate.concurrency());
 
 // Bundle first, so a bad import fails before anything connects.
 let code = "";
@@ -71,10 +74,13 @@ const timeoutMs = Number(opts.timeout) * 1000;
 const stopRun = new AbortController();
 let started = false;
 let timedOut = false;
+// When the timeout fired, so the summary counts only the rate-limit pauses before it.
+let stoppedAt: number | undefined;
 let deadline = Infinity;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const expire = () => {
   timedOut = true;
+  stoppedAt ??= Date.now();
   stopRun.abort();
 };
 const startTimer = () => {
@@ -109,6 +115,7 @@ try {
   console.error(err.message);
   process.exit(3);
 }
+mcp.rateGate = new RateGate({ concurrency });
 
 // Regenerate types/ when Webflow's tool schemas no longer match the ones they were generated from. A run that
 // may change the site stops there, so the changes and any guessed access levels get a look first. Types written
@@ -160,12 +167,8 @@ if (!opts["no-check"] && tsc) {
 
 const counts: Record<Access | "blocked", number> = { read: 0, sensitive: 0, write: 0, destructive: 0, blocked: 0 };
 const uploads = new UploadTargets();
-let firstCall: Promise<CallOutput> | undefined;
-// The first call gets the session ID issued; later calls reuse it, so they wait for the first one.
-function inOrder(exec: () => Promise<CallOutput>): Promise<CallOutput> {
-  if (!firstCall) return (firstCall = exec());
-  return firstCall.catch(() => {}).then(exec);
-}
+// The structure of each action's results this run, merged into shapes.json at the end (shapes.ts).
+const shapes = new Map<string, Shape>();
 
 // Most inputs are objects; a few designer_tool actions take `true`.
 type Request = { tool: string; action: string | null; input: unknown; toolArgs: Record<string, unknown> };
@@ -194,7 +197,10 @@ const askOne = limiter(1);
 // leaves the prompt showing the site ID.
 let siteNames: Promise<Map<string, string>> | undefined;
 async function siteName(id: string): Promise<string | undefined> {
-  siteNames ??= inOrder(() => limit(() => callOutput(mcp, "data_sites_tool", { actions: [{ label: "sites", list_sites: {} }] })))
+  siteNames ??= callOutput(mcp, "data_sites_tool", { actions: [{ label: "sites", list_sites: {} }] }, mcp.context, {
+    signal: stopRun.signal,
+    admit: limit,
+  })
     .then(({ text }) => {
       const result = unwrap("data_sites_tool.list_sites", text) as { sites?: Array<{ id: string; displayName: string }> };
       return new Map((result?.sites ?? []).map((s) => [s.id, s.displayName]));
@@ -252,20 +258,24 @@ async function handle(req: Request): Promise<unknown> {
   }
   counts[access]++;
 
-  // Reads are retried on 429. Writes are not, since a tool may have applied part of the change already.
-  // At most --concurrency calls run at once; a call waiting out a rate limit keeps its slot.
-  const output = await inOrder(() => limit(() => callOutput(mcp, req.tool, args, mcp.context, { retryRateLimit: access === "read" })));
+  // Reads that reach Webflow and fail with a 429, or a 401 partway, are sent again. Writes are not, since a tool may
+  // have applied part of the change already. At most --concurrency requests are out at once, fewer while Webflow is
+  // rate limiting the run; a call gives up its slot while it waits out a pause or a login recovery. A call still
+  // waiting when the run stops is never sent.
+  const output = await callOutput(mcp, req.tool, args, mcp.context, { resend: access === "read", signal: stopRun.signal, admit: limit });
   const { text } = output;
   const value = req.action ? unwrap(name, text) : parseMaybe(text);
   uploads.record(name, value);
-  if (!output.images.length) return value;
   // Images (element snapshots) are saved to out/ and returned as paths, which the agent can open.
   const images = output.images.map((image, i) => {
     const file = path.join(OUT_DIR, `${req.tool}-${Date.now()}-${i}.${image.mimeType.split("/")[1] ?? "png"}`);
     fs.writeFileSync(file, Buffer.from(image.data, "base64"));
     return file;
   });
-  return { images, result: value };
+  const returned = images.length ? { images, result: value } : value;
+  // Sensitive results (form submissions, members, logs) can be keyed by personal data, so their shapes aren't kept.
+  if (access !== "sensitive") shapes.set(name, merge(shapes.get(name), shapeOf(returned)));
+  return returned;
 }
 
 // One action's result. Data tools answer {label, action, result | error}; tools that go through the Designer
@@ -313,8 +323,9 @@ const result = await runSandboxed(
     print: (text) => {
       output += `${text}\n`;
     },
+    // Past the deadline, stop the run the same way the timer does, so calls waiting to be sent see it at once.
     shouldStop: () => {
-      if (Date.now() > deadline) timedOut = true;
+      if (Date.now() > deadline) expire();
       return timedOut;
     },
   },
@@ -322,6 +333,14 @@ const result = await runSandboxed(
 );
 clearTimeout(timer);
 await mcp.client.close();
+
+// Recording shapes only helps later sessions, so a failure to save them doesn't fail the run.
+try {
+  const added = saveShapes(shapes);
+  if (added.length) console.error(`[wf-mcp] Recorded what ${added.join(", ")} returned: \`wf-mcp types <tool>.<action>\` now shows it.`);
+} catch (err) {
+  console.error(`[wf-mcp] Couldn't save the response shapes: ${errorMessage(err)}`);
+}
 
 // Long output keeps its start and its end; the full log is saved.
 if (output.length > maxOutput) {
@@ -336,7 +355,14 @@ if (longNote) console.error(longNote);
 
 const exitCode = result === "stopped" ? 124 : result === "error" ? 1 : 0;
 const tally = [...ACCESS_LEVELS, "blocked" as const].filter((l) => counts[l]).map((l) => `${l} ${counts[l]}`);
-console.error(
-  `[wf-mcp] Calls: ${tally.length ? tally.join(", ") : "none"}.${timedOut ? ` Timed out after ${opts.timeout}s.` : ""} Exit ${exitCode}.`,
-);
+const { hits } = mcp.rateGate;
+const paused = Math.round(mcp.rateGate.cooldownMs(stoppedAt) / 1000);
+const limited = hits ? ` Rate limited ${hits} time${hits === 1 ? "" : "s"}; pauses lasted ${paused}s in all.` : "";
+// Rate-limit pauses count toward the timeout.
+const timeoutNote = !timedOut
+  ? ""
+  : paused
+    ? ` Timed out after ${opts.timeout}s, ${paused}s of them in rate-limit pauses: try a longer --timeout or a lower --concurrency.`
+    : ` Timed out after ${opts.timeout}s.`;
+console.error(`[wf-mcp] Calls: ${tally.length ? tally.join(", ") : "none"}.${limited}${timeoutNote} Exit ${exitCode}.`);
 process.exit(exitCode);

@@ -1,6 +1,6 @@
 {
   "name": "webflow-codemode",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Run TypeScript snippets against Webflow's MCP server in a sandbox, so bulk reads and loops stay out of Claude's context. Writes need your approval in a dialog.",
   "author": {
     "name": "Wicked Apps"

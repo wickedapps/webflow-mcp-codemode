@@ -61,6 +61,9 @@ export const HOME_TRUSTED = HOME === GLOBAL_HOME || projectHomeTrusted(HOME);
 // Write and sensitive actions the user chose to always allow (trust.ts).
 export const APPROVALS_FILE = path.join(HOME, "approvals.json");
 export const TYPES_DIR = path.join(HOME, "types");
+// The structure of what each action returned in earlier runs (shapes.ts). Kept outside types/, which is replaced
+// whenever Webflow's schemas change.
+export const SHAPES_FILE = path.join(HOME, "shapes.json");
 export const OUT_DIR = path.join(HOME, "out");
 export const SNIPPETS_DIR = path.join(HOME, "snippets");
 // The plugin's example snippets, rewritten to match the binary (home.ts). The rest of snippets/ is the user's.

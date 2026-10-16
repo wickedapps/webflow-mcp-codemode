@@ -11,6 +11,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { credentialStore, restorePrevious, setAside, type CredentialStore } from "./credentials.ts";
+import { RateGate } from "./limits.ts";
 import { howToRun } from "./plugin.ts";
 
 export interface ConnectOptions {
@@ -58,8 +59,15 @@ export interface WebflowMcp {
   // `seen` is the stage the failed call started at; if another call already moved it on, this returns at once.
   // Throws LoginRequiredError when a browser login is needed but not allowed, and an error after stage 2.
   recover(seen: number): Promise<void>;
+  // The recovery under way, if any. No call goes out while it runs: it closes and replaces the client.
+  recovering(): Promise<void> | undefined;
+  // Settles when the call sent without a session ID (sessionId "start") comes back. Until one gets an ID issued,
+  // calls go out one at a time, so they all share the session instead of each starting its own.
+  issuing?: Promise<void>;
   // Set when recovery failed; every later call throws it instead of trying again.
   failure?: Error;
+  // The pause every call waits out while Webflow rate limits this connection (429).
+  rateGate: RateGate;
 }
 
 // The login is read once and then kept in memory; this process is the only one changing it during a run.
@@ -236,9 +244,13 @@ export async function connect(options: ConnectOptions): Promise<WebflowMcp> {
       options.context ??
       `Script "${name}" is calling Webflow MCP tools programmatically on behalf of its user to read or update this Webflow site's data.`,
     authStage: 0,
+    rateGate: new RateGate(),
+    recovering: () => pending,
     recover(seen) {
       if (mcp.failure) return Promise.reject(mcp.failure);
-      if (seen !== mcp.authStage) return pending ?? Promise.resolve();
+      // Calls that got a 401 together all wait on one recovery: two at once would each close and replace the client.
+      if (pending) return pending;
+      if (seen !== mcp.authStage) return Promise.resolve();
       if (mcp.authStage >= 2) return Promise.reject(new Error(RELOGIN_FAILED));
       pending = (async () => {
         await mcp.client.close().catch(() => {});
@@ -273,9 +285,17 @@ export interface ActionResult<T = unknown> {
 }
 
 export interface CallOptions {
-  // Retry when Webflow answers 429, waiting 2, 4, 8, 16 and 32 seconds. Default true. Turn it off for writes:
-  // a tool that makes several API requests may have applied some changes before the one that was limited.
-  retryRateLimit?: boolean;
+  // Whether a call that reached Webflow and failed may be sent again: after a 429, or a 401 in the tool's result
+  // (the tool ran, and Webflow's data API rejected the login partway). Default true. Turn it off for writes: a tool
+  // that makes several API requests may have applied some changes before the one that failed. A 401 from the MCP
+  // server itself means the tool never ran, so that is retried either way.
+  resend?: boolean;
+  // The run's stop signal. A call not yet sent when it aborts is never sent: one waiting out a rate-limit pause
+  // would otherwise go out during the grace period the sandbox gives calls already in flight.
+  signal?: AbortSignal;
+  // Runs each request, e.g. in a concurrency limiter. A call waiting out a rate-limit pause or a login recovery holds
+  // no slot, and takes one again for each retry, so a limit lowered meanwhile applies to retries too.
+  admit?: <T>(request: () => Promise<T>) => Promise<T>;
 }
 
 // A tool's output: its text parts joined, plus any images (element snapshots return a PNG).
@@ -297,51 +317,129 @@ export async function callText(
 
 // Call a tool and return its text and images. Adds the session_id, agent_id and context the server requires.
 // The first call's output starts with a separate content part that issues the session ID; it is dropped here.
+// Until a call gets a session ID issued, calls go out one at a time (WebflowMcp.issuing).
 // If Webflow answers 401, the tokens are refreshed and the call retried; if it still gets 401, the user logs
-// in again in the browser (when allowed) and the call is retried once more.
+// in again in the browser (when allowed) and the call is retried once more. A 429 pauses every call on the
+// connection (RateGate); the call is retried after the pause, up to RATE_LIMIT_RETRIES times.
 export async function callOutput(
   mcp: WebflowMcp,
   name: string,
   args: Record<string, unknown>,
   context = mcp.context,
-  { retryRateLimit = true }: CallOptions = {},
+  { resend = true, signal, admit = (request) => request() }: CallOptions = {},
 ): Promise<CallOutput> {
-  let waits = 0;
+  const gate = mcp.rateGate;
+  let retries = 0;
   for (;;) {
-    if (mcp.failure) throw mcp.failure;
-    const stage = mcp.authStage;
-    const result = await attempt(mcp, name, args, context);
-    if (result === UNAUTHORIZED) {
-      await mcp.recover(stage).catch((err: Error) => {
-        throw err instanceof LoginRequiredError ? err : new Error(`${name}: ${err.message}`);
-      });
-      continue;
+    if (!(await gate.open(signal))) throw stopped(name, retries);
+    // Everything that decides whether the request goes out, and what its answer means for the calls behind it,
+    // happens while it holds its slot: the run may have stopped, a pause or a login recovery may have begun while it
+    // waited, and a 429 or 401 starts the pause or recovery before the next queued call can go out.
+    const outcome = await admit(async (): Promise<Outcome> => {
+      if (signal?.aborted) return { kind: "stopped" };
+      if (!gate.isOpen()) return { kind: "paused" };
+      const recovering = mcp.recovering();
+      if (recovering) return { kind: "waiting", done: settle(recovering) };
+      if (mcp.sessionId === "start" && mcp.issuing) return { kind: "waiting", done: mcp.issuing };
+      if (mcp.failure) throw mcp.failure;
+      const stage = mcp.authStage;
+      const ticket = gate.ticket();
+      let issued: (() => void) | undefined;
+      if (mcp.sessionId === "start") mcp.issuing = new Promise<void>((resolve) => (issued = resolve));
+      let result: Awaited<ReturnType<typeof attempt>>;
+      try {
+        result = await attempt(mcp, name, args, context);
+      } finally {
+        if (issued) {
+          mcp.issuing = undefined;
+          issued();
+        }
+      }
+      if (result === RATE_LIMITED) return { kind: "limited", ...gate.limited(ticket) };
+      if (result === UNAUTHORIZED) return { kind: "unauthorized", done: settle(mcp.recover(stage)) };
+      if (result === REJECTED) return { kind: "rejected", done: settle(mcp.recover(stage)) };
+      gate.passed(ticket);
+      return { kind: "ok", output: result };
+    });
+    switch (outcome.kind) {
+      case "ok":
+        return outcome.output;
+      case "stopped":
+        throw stopped(name, retries);
+      case "paused":
+        continue;
+      case "waiting":
+        // For a recovery that failed, mcp.failure is set and the next pass throws it.
+        await outcome.done;
+        continue;
+      case "unauthorized":
+      case "rejected": {
+        const err = await outcome.done;
+        if (err) throw err instanceof LoginRequiredError ? err : new Error(`${name}: ${err.message}`);
+        if (outcome.kind === "rejected" && !resend) throw new Error(`${name}: ${UNAUTHORIZED_WRITE}`);
+        continue;
+      }
+      case "limited": {
+        if (!resend) throw new Error(`${name}: ${RATE_LIMITED_WRITE}`);
+        if (retries++ === RATE_LIMIT_RETRIES) throw new Error(`${name}: Webflow is still rate limiting after ${RATE_LIMIT_RETRIES} retries.`);
+        // One line when the limiting starts and one per long pause, not one per call.
+        const { seconds, started } = outcome;
+        if (gate.hits === 1) console.error(`[webflow-mcp] Webflow is rate limiting calls (429); pausing every call for ${seconds}s, then retrying.`);
+        else if (started && seconds >= 16) console.error(`[webflow-mcp] Still rate limited; pausing for ${seconds}s.`);
+        continue;
+      }
+      default: {
+        const _exhaustive: never = outcome;
+        throw new Error(`${name}: unexpected outcome ${JSON.stringify(_exhaustive)}`);
+      }
     }
-    if (result !== RATE_LIMITED) return result;
-    if (!retryRateLimit) throw new Error(`${name}: ${RATE_LIMITED_WRITE}`);
-    if (waits === RATE_LIMIT_DELAYS.length) throw new Error(`${name}: Webflow is still rate limiting after ${waits} retries.`);
-    const delay = RATE_LIMIT_DELAYS[waits++] ?? 0;
-    console.error(`[webflow-mcp] ${name} was rate limited (429); retrying in ${delay}s.`);
-    await new Promise((r) => setTimeout(r, delay * 1000));
   }
 }
 
+// What one pass of callOutput found, decided while the call held its slot.
+type Outcome =
+  | { kind: "ok"; output: CallOutput }
+  | { kind: "stopped" }
+  | { kind: "paused" }
+  // A login recovery, or the call getting the session ID issued: wait for it outside the slot, then try again.
+  | { kind: "waiting"; done: Promise<unknown> }
+  // A 401 and the login recovery it started. "unauthorized": the MCP server rejected the login, so the tool never
+  // ran. "rejected": the tool ran and Webflow's data API rejected the login, possibly partway.
+  | { kind: "unauthorized" | "rejected"; done: Promise<Error | undefined> }
+  | { kind: "limited"; seconds: number; started: boolean };
+
+// A promise that never rejects: the error it failed with, or undefined.
+const settle = (p: Promise<void>): Promise<Error | undefined> =>
+  p.then(
+    () => undefined,
+    (err: unknown) => (err instanceof Error ? err : new Error(String(err))),
+  );
+
+const stopped = (name: string, retries: number) =>
+  new Error(`${name}: ${retries ? "not retried" : "not sent"}, because the run had stopped.`);
+
+// The MCP server rejected the login: the tool never ran.
 const UNAUTHORIZED = Symbol("unauthorized");
+// The tool ran and Webflow's data API rejected the login, possibly after some of its requests went through.
+const REJECTED = Symbol("rejected");
 const RATE_LIMITED = Symbol("rate limited");
-const RATE_LIMIT_DELAYS = [2, 4, 8, 16, 32];
+// A call limited on every try gives up after pauses of 2, 4, 8, 16, 32 and 32 seconds, unless the run stops first.
+const RATE_LIMIT_RETRIES = 6;
 const RELOGIN_FAILED =
   "Webflow still answers 401 after a new login. Check that this site was selected on the Webflow consent screen.";
+const UNAUTHORIZED_WRITE =
+  "Webflow rejected the login (401) while this call ran. The login was renewed, but the call wasn't sent again because it changes data and may have partly run: check the site before running it again.";
 const RATE_LIMITED_WRITE =
   "Webflow rate limited this call (429). It was not retried because it changes data and may have partly run: check the site before running it again.";
 
-// One call. Returns UNAUTHORIZED when the MCP login or the Webflow data API rejects the credentials,
-// and RATE_LIMITED when Webflow answers 429.
+// One call. Returns UNAUTHORIZED when the MCP server rejects the login, REJECTED when the tool ran and Webflow's
+// data API rejected it, and RATE_LIMITED when Webflow answers 429.
 async function attempt(
   mcp: WebflowMcp,
   name: string,
   args: Record<string, unknown>,
   context: string,
-): Promise<CallOutput | typeof UNAUTHORIZED | typeof RATE_LIMITED> {
+): Promise<CallOutput | typeof UNAUTHORIZED | typeof REJECTED | typeof RATE_LIMITED> {
   let res;
   try {
     res = await mcp.client.callTool({
@@ -365,7 +463,7 @@ async function attempt(
   }
   const text = parts.join("");
   const status = errorStatus(text, Boolean(res.isError));
-  if (status === 401) return UNAUTHORIZED;
+  if (status === 401) return REJECTED;
   if (status === 429) return RATE_LIMITED;
   if (res.isError) throw new Error(`${name}: ${text}`);
   return { text, images };

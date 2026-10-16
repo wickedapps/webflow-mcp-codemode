@@ -1,5 +1,5 @@
 // Print the generated types for single actions, so a session reads one action's inputs instead of a whole tool's
-// file (some are over 20,000 characters).
+// file (some are over 20,000 characters). An action that earlier runs called also shows what it returned.
 //   wf-mcp types data_cms_tool.list_collection_items [more.actions...]
 //   wf-mcp types data_cms_tool          the tool's description and its actions by access level
 import fs from "node:fs";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { readManifest } from "./gen-types.ts";
 import { ACCESS_LEVELS } from "./access.ts";
 import { TYPES_DIR } from "./paths.ts";
+import { shapeNote } from "./shapes.ts";
 
 const MEMBER = /^  (\w+)<T = unknown>\(/;
 const MEMBER_START = /^  (\/\*\*|\w+<T = unknown>\()/;
@@ -42,10 +43,16 @@ export function describeType(name: string): { ok: boolean; text: string } {
   const source = fs.readFileSync(file, "utf8");
   const actions = actionNames(source);
   // A tool without actions is one short signature.
-  if (!actions.length) return action ? { ok: false, text: `${tool} has no actions; call it as webflow.${tool}(input).` } : { ok: true, text: source.trimEnd() };
+  // Actions that earlier runs called also get the shape of what they returned (shapes.ts).
+  const withShape = (text: string, name: string) => [text, shapeNote(name)].filter(Boolean).join("\n");
+  if (!actions.length) {
+    return action ? { ok: false, text: `${tool} has no actions; call it as webflow.${tool}(input).` } : { ok: true, text: withShape(source.trimEnd(), tool) };
+  }
   if (action) {
     const doc = actionDoc(source, action);
-    return doc ? { ok: true, text: `// ${tool}\n${doc}` } : { ok: false, text: `No action ${tool}.${action}. Its actions: ${actions.join(", ")}.` };
+    return doc
+      ? { ok: true, text: withShape(`// ${tool}\n${doc}`, `${tool}.${action}`) }
+      : { ok: false, text: `No action ${tool}.${action}. Its actions: ${actions.join(", ")}.` };
   }
   const intro = source.slice(0, source.indexOf("export interface")).replace(/^\/\/ Generated.*\n\n?/, "").trimEnd();
   const entry = readManifest()?.tools[tool];

@@ -87,7 +87,7 @@ The built binary and compiler aren't committed. Claude Code installs the zip att
 cd src
 bun install
 bun dev login            # log in to ~/.wf-mcp (or a signed WF_MCP_HOME), writes types/
-bun test                 # access table, Keychain store, 401/429 detection, output limits, approval prompt
+bun test                 # access table, Keychain store, 401/429 handling, output limits, response shapes, approval prompt
 bun run build            # typecheck, compile the binary into plugins/webflow-codemode/scripts/, write the zip
 bun run audit:ages       # check that every locked package is at least 24 hours old
 ```
@@ -104,9 +104,9 @@ bun run audit:ages       # check that every locked package is at least 24 hours 
 
 ### How it works
 
-- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `types`, `snippets`, `approvals` and `home`. `types <tool>.<action>` prints one action's docs from `types/` (`src/type-docs.ts`), so Claude doesn't read a whole tool's file; `snippets` lists saved snippets and examples with their header comments (`src/snippets.ts`).
+- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `types`, `snippets`, `approvals` and `home`. `types <tool>.<action>` prints one action's docs from `types/` (`src/type-docs.ts`), so Claude doesn't read a whole tool's file, plus the key names and types the action returned in earlier runs, recorded in the home's `shapes.json` (`src/shapes.ts`), since Webflow publishes no output schemas; `snippets` lists saved snippets and examples with their header comments (`src/snippets.ts`).
 - The login lives in the macOS Keychain: a generic password with service `wf-mcp` and the home's path as the account, plus `<path>#previous` for the login before it (`src/credentials.ts`). It's written through `security -i` on stdin so tokens never show in a process list.
-- Other state lives in a home folder (`approvals.json`, `types/`, `snippets/`, `out/`, `support/`): a project's own `.wf-mcp/` if it has one, else `~/.wf-mcp/` (`src/paths.ts`).
+- Other state lives in a home folder (`approvals.json`, `shapes.json`, `types/`, `snippets/`, `out/`, `support/`): a project's own `.wf-mcp/` if it has one, else `~/.wf-mcp/` (`src/paths.ts`).
 - Each call's access level comes from the access table compiled into the binary (`buildManifest` in `src/gen-types.ts`), never from `types/manifest.json` on disk.
 - Any home other than `~/.wf-mcp/` is used only if `init` signed it: an HMAC of its path, keyed by `~/.wf-mcp/.project-key` (`src/paths.ts`). That includes a folder named by `$WF_MCP_HOME`, since a repo's `.claude/settings.json` or `.envrc` can set it. Other folders make every command exit with code 5; `WF_MCP_HOME=<dir> wf-mcp init` signs one.
 - `logout` and `login --force` revoke the login they discard at Webflow's revocation endpoint, then try its refresh token once to confirm it's dead (`src/revoke.ts`).
