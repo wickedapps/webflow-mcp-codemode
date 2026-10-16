@@ -10,7 +10,7 @@
       "source": {
         "source": "archive",
         "url": "https://github.com/wickedapps/webflow-mcp-codemode/releases/download/v1.2.0/webflow-codemode.zip",
-        "sha256": "4fd78e9318c605ed0d077a098ecaa98b47518b339e5898e51373ec810685a487"
+        "sha256": "326178d60693f04223e3e9c86e450f817dc600c3031f21b66e11685aed176597"
       },
       "description": "Run TypeScript snippets against Webflow's MCP server for bulk reads, exports and checked writes.",
       "author": {

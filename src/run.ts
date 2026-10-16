@@ -16,7 +16,7 @@ import { ACCESS_LEVELS, parseAllow, type Access } from "./access.ts";
 import { LoginRequiredError, callOutput, connect, type CallOutput, type WebflowMcp } from "./client.ts";
 import { confirmCall } from "./confirm.ts";
 import { errorMessage } from "./errors.ts";
-import { buildManifest, diffManifests, readManifest, schemaHash, writeTypes, type Manifest } from "./gen-types.ts";
+import { buildManifest, diffManifests, readManifest, staleTypes, writeTypes, type Manifest } from "./gen-types.ts";
 import { limiter, truncateMiddle } from "./limits.ts";
 import { OUT_DIR, SUPPORT_DIR, TYPES_DIR, tscPath } from "./paths.ts";
 import { APPROVAL_DAYS, isRemembered, remember, rememberable } from "./trust.ts";
@@ -111,10 +111,13 @@ try {
 }
 
 // Regenerate types/ when Webflow's tool schemas no longer match the ones they were generated from. A run that
-// may change the site stops there, so the changes and any guessed access levels get a look first.
+// may change the site stops there, so the changes and any guessed access levels get a look first. Types written
+// by an older binary in an older format are rewritten quietly: nothing about the tools changed.
 let manifest: Manifest | undefined = readManifest();
 const { tools } = await mcp.client.listTools();
-if (manifest?.hash !== schemaHash(tools)) {
+const stale = staleTypes(manifest, tools);
+if (stale === "format") manifest = writeTypes(tools);
+if (stale === "schemas") {
   const before = manifest;
   manifest = writeTypes(tools);
   console.error("[wf-mcp] Webflow's tool schemas changed, so types/ was regenerated:");

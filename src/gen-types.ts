@@ -20,7 +20,21 @@ export type ToolEntry =
 export interface Manifest {
   generatedAt: string;
   hash: string;
+  // How this binary writes types/ (TYPES_FORMAT); missing in types written before it was added.
+  format?: number;
   tools: Record<string, ToolEntry>;
+}
+
+// Bump when the generated files change shape (say, what index.md shows), so existing homes are rewritten even
+// though Webflow's schemas haven't changed.
+export const TYPES_FORMAT = 2;
+
+// Why types/ needs writing for this tools/list result, if it does: Webflow's schemas changed, or only the way
+// this binary writes them.
+export function staleTypes(manifest: Manifest | undefined, tools: Tool[]): "schemas" | "format" | undefined {
+  if (manifest?.hash !== schemaHash(tools)) return "schemas";
+  if (manifest.format !== TYPES_FORMAT) return "format";
+  return undefined;
 }
 
 const MANIFEST = path.join(TYPES_DIR, "manifest.json");
@@ -138,6 +152,20 @@ function toolFile(tool: Tool): { source: string; entry: ToolEntry } {
   return { source, entry: { kind: "actions", hash: toolHash, toolArgs, actions, guessed } };
 }
 
+// Whether an action's input lets Webflow filter or sort the results, within its first few levels (CMS items keep
+// them under `request`). The catalog marks these, so a snippet narrows results on Webflow's side instead of
+// reading everything and filtering in code.
+export function narrowing(schema: Schema | undefined, depth = 0): Array<"filter" | "sort"> {
+  if (!schema || depth > 3) return [];
+  const found = new Set<"filter" | "sort">();
+  for (const [k, v] of Object.entries(schema.properties ?? {})) {
+    if (k === "filter" || k === "filters") found.add("filter");
+    if (k === "sort" || k === "sortBy") found.add("sort");
+    for (const f of narrowing(v, depth + 1)) found.add(f);
+  }
+  return (["filter", "sort"] as const).filter((f) => found.has(f));
+}
+
 function catalog(tools: Tool[], manifest: Manifest): string {
   const lines = [
     "# Webflow MCP tools",
@@ -145,6 +173,7 @@ function catalog(tools: Tool[], manifest: Manifest): string {
     `Generated ${manifest.generatedAt} by \`wf-mcp gen\`. Full signatures and docs: \`types/<tool>.ts\`.`,
     "Call from a snippet as `webflow.<tool>.<action>(input, tool?)`, or `webflow.<tool>(input)` for tools without actions.",
     "Snippets may make read calls by default; the other levels need `--allow sensitive`, `--allow write` or `--allow destructive`.",
+    "Reads marked (filter) or (sort) can narrow or order results on Webflow's side: use that instead of reading everything and filtering in the snippet.",
   ];
   for (const tool of tools) {
     const entry = manifest.tools[tool.name];
@@ -157,8 +186,14 @@ function catalog(tools: Tool[], manifest: Manifest): string {
       continue;
     }
     if (entry.toolArgs.length) lines.push(`- tool args: ${entry.toolArgs.join(", ")}`);
+    const schemas = new Map(actionVariants(tool));
     for (const level of ACCESS_LEVELS) {
-      const names = Object.keys(entry.actions).filter((a) => entry.actions[a] === level);
+      const names = Object.keys(entry.actions)
+        .filter((a) => entry.actions[a] === level)
+        .map((a) => {
+          const marks = level === "read" || level === "sensitive" ? narrowing(schemas.get(a)) : [];
+          return marks.length ? `${a} (${marks.join(", ")})` : a;
+        });
       if (names.length) lines.push(`- ${level}: ${names.join(", ")}`);
     }
   }
@@ -188,7 +223,7 @@ export function writeTypes(tools: Tool[]): Manifest {
   const dir = `${TYPES_DIR}.new-${process.pid}`;
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  const manifest: Manifest = { generatedAt: new Date().toISOString(), hash: schemaHash(tools), tools: {} };
+  const manifest: Manifest = { generatedAt: new Date().toISOString(), hash: schemaHash(tools), format: TYPES_FORMAT, tools: {} };
   for (const tool of tools) {
     const { source, entry } = toolFile(tool);
     manifest.tools[tool.name] = entry;

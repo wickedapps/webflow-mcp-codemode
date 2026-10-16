@@ -1,0 +1,68 @@
+// Example snippet: find CMS items by a field's value, with Webflow doing the filtering, and optionally the items in
+// another collection that reference them (a join done as filtered reads, not by reading both collections).
+//   wf-mcp run ~/.wf-mcp/snippets/examples/find-items.ts <collectionId> <field> <op> <value> [<otherCollectionId> <referenceField>]
+// <op> is eq, ne, gt, gte, lt, lte, contains, ncontains, exists ("true" or "false"), in or nin (comma-separated values).
+// Field slugs come from get_collection_details. Writes out/find-items.json and prints a summary.
+export {};
+
+const [collectionId, field, opArg, value, otherCollectionId, referenceField] = args;
+if (!collectionId || !field || !opArg || value === undefined) {
+  throw new Error("Usage: find-items.ts <collectionId> <field> <op> <value> [<otherCollectionId> <referenceField>]");
+}
+if (otherCollectionId && !referenceField) throw new Error("Pass the reference field along with the other collection.");
+
+// The filter types come from the generated signature, so they match what Webflow accepts.
+type Request = NonNullable<Parameters<typeof webflow.data_cms_tool.list_collection_items>[0]["request"]>;
+type Filter = NonNullable<Request["filter"]>;
+type Condition = Filter[string];
+
+const OPS = ["eq", "ne", "gt", "gte", "lt", "lte", "contains", "ncontains", "exists", "in", "nin"] as const;
+type Op = (typeof OPS)[number];
+const isOp = (s: string): s is Op => (OPS as readonly string[]).includes(s);
+if (!isOp(opArg)) throw new Error(`Unknown op "${opArg}". Use one of: ${OPS.join(", ")}.`);
+
+function condition(op: Op, raw: string): Condition {
+  const c: Condition = {};
+  if (op === "in" || op === "nin") c[op] = raw.split(",").map((v) => v.trim());
+  else if (op === "exists") {
+    if (raw !== "true" && raw !== "false") throw new Error(`exists takes "true" or "false", not "${raw}".`);
+    c.exists = raw;
+  } else c[op] = raw;
+  return c;
+}
+
+type Item = { id: string; isDraft?: boolean; isArchived?: boolean; fieldData: { name?: string; slug?: string } };
+type Page = { items: Item[]; pagination?: { total?: number } };
+
+// Every item matching the filter, a page of 100 at a time.
+async function findAll(collection_id: string, filter: Filter): Promise<Item[]> {
+  const items: Item[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await webflow.data_cms_tool.list_collection_items<Page>({ collection_id, request: { filter, limit: 100, offset } });
+    items.push(...page.items);
+    if (page.items.length < 100 || items.length >= (page.pagination?.total ?? 0)) return items;
+  }
+}
+
+const status = (i: Item) => (i.isArchived ? "archived" : i.isDraft ? "draft" : "live");
+const row = (i: Item) => ({ id: i.id, name: i.fieldData.name ?? "", slug: i.fieldData.slug ?? "", status: status(i) });
+
+const matches = await findAll(collectionId, { [field]: condition(opArg, value) });
+console.log(`${matches.length} item(s) where ${field} ${opArg} ${value}`);
+for (const i of matches.slice(0, 20)) console.log(`  ${i.id}  ${i.fieldData.name ?? ""} (${status(i)})`);
+if (matches.length > 20) console.log(`  … and ${matches.length - 20} more`);
+
+const referencing: Item[] = [];
+if (otherCollectionId && referenceField && matches.length) {
+  // A reference field filters on item IDs. Batches keep each request's `in` list short.
+  const ids = matches.map((m) => m.id);
+  for (let i = 0; i < ids.length; i += 50) {
+    referencing.push(...(await findAll(otherCollectionId, { [referenceField]: { in: ids.slice(i, i + 50) } })));
+  }
+  console.log(`\n${referencing.length} item(s) in ${otherCollectionId} whose ${referenceField} references one of them`);
+  const counts = new Map<string, number>();
+  for (const r of referencing) counts.set(status(r), (counts.get(status(r)) ?? 0) + 1);
+  console.log(`  ${[...counts].map(([s, n]) => `${n} ${s}`).join(", ")}`);
+}
+
+console.log(out.write("find-items.json", { filter: { [field]: { [opArg]: value } }, matches: matches.map(row), referencing: referencing.map(row) }));

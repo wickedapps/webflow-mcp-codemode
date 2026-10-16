@@ -6,7 +6,7 @@
 import { callText, connect } from "./client.ts";
 import { credentialStore, forgetLogin, setAside, type Slot } from "./credentials.ts";
 import { describeRevoke, revokeLogin } from "./revoke.ts";
-import { readManifest, schemaHash, writeTypes } from "./gen-types.ts";
+import { readManifest, staleTypes, writeTypes } from "./gen-types.ts";
 import { HOME, HOME_SOURCE, TYPES_DIR } from "./paths.ts";
 import { IN_PLUGIN } from "./plugin.ts";
 import { errorMessage } from "./errors.ts";
@@ -48,7 +48,7 @@ export async function login(force: boolean): Promise<void> {
     store.remove("previous");
   }
   const { tools } = await mcp.client.listTools();
-  if (readManifest()?.hash !== schemaHash(tools)) {
+  if (staleTypes(readManifest(), tools)) {
     writeTypes(tools);
     console.log(`Wrote the tool types to ${TYPES_DIR}.`);
   }

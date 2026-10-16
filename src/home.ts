@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import globals from "./seed/globals.d.ts.txt" with { type: "text" };
+import findItems from "./seed/find-items.ts.txt" with { type: "text" };
 import findText from "./seed/find-text.ts.txt" with { type: "text" };
 import getStyle from "./seed/get-style.ts.txt" with { type: "text" };
 import listCollections from "./seed/list-collections.ts.txt" with { type: "text" };
@@ -32,6 +33,7 @@ const COMPILER_OPTIONS = {
 };
 
 const SNIPPETS: Record<string, string> = {
+  "find-items.ts": findItems,
   "find-text.ts": findText,
   "get-style.ts": getStyle,
   "list-collections.ts": listCollections,
