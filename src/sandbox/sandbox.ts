@@ -1,6 +1,7 @@
 // Runs a snippet in a QuickJS WebAssembly sandbox inside the runner's process. The snippet gets only what
 // PRELUDE defines (`webflow`, `console`, `args`, `out` and `sleep`) and has no network, file system, process
-// or environment access of its own. Every Webflow call and file operation goes through the host functions here.
+// or environment access of its own. Every Webflow call, file operation and upload goes through the host functions here.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { BunPlugin } from "bun";
@@ -12,6 +13,8 @@ export interface SandboxHost {
   // The only folder `out.read()` and `out.write()` can reach.
   outDir: string;
   call(tool: string, action: string | null, input: unknown, toolArgs: unknown): Promise<unknown>;
+  // Send a file in outDir (full path) to an upload target from create_asset and the like (upload.ts).
+  upload?(file: string, target: unknown): Promise<unknown>;
   print(text: string): void;
   // Checked while snippet code runs, where timers can't fire: returning true stops the run, as an abort does.
   shouldStop?(): boolean;
@@ -54,7 +57,7 @@ export async function bundleSnippet(entry: string): Promise<string> {
 
 // Guest-side setup. Takes the host functions off the global object and defines the snippet's globals.
 const PRELUDE = (args: string[]) => `(() => {
-  const host = { call: __wf_call, print: __wf_print, write: __wf_write, read: __wf_read, sleep: __wf_sleep };
+  const host = { call: __wf_call, print: __wf_print, write: __wf_write, read: __wf_read, md5: __wf_md5, upload: __wf_upload, sleep: __wf_sleep };
   for (const name of Object.keys(globalThis)) if (name.startsWith("__wf_")) delete globalThis[name];
   const show = (v) => {
     if (typeof v === "string") return v;
@@ -75,6 +78,8 @@ const PRELUDE = (args: string[]) => `(() => {
   const out = {
     write: (name, data) => host.write(String(name), typeof data === "string" ? data : JSON.stringify(data, null, 2)),
     read: (name) => host.read(String(name)),
+    md5: (name) => host.md5(String(name)),
+    upload: (name, target) => host.upload(String(name), JSON.stringify(target ?? null)).then(JSON.parse),
   };
   const define = (name, value) => Object.defineProperty(globalThis, name, { value: Object.freeze(value) });
   define("webflow", webflow);
@@ -167,6 +172,11 @@ export async function runSandboxed(code: string, host: SandboxHost, abort: Abort
     return file;
   });
   syncFn("__wf_read", (name) => fs.readFileSync(outPath(name), "utf8"));
+  syncFn("__wf_md5", (name) => createHash("md5").update(fs.readFileSync(outPath(name))).digest("hex"));
+  asyncFn("__wf_upload", async (name, target) => {
+    if (!host.upload) throw new Error("Uploads aren't available here.");
+    return JSON.stringify((await host.upload(outPath(name), JSON.parse(target))) ?? null);
+  });
   vm.unwrapResult(vm.evalCode(PRELUDE(host.args), "prelude.js")).dispose();
 
   const report = (error: QuickJSHandle) => {

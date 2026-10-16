@@ -57,7 +57,13 @@ const phrase = (ws: string[]) =>
     .replace("robots txt", "robots.txt");
 
 // "data_cms_tool.update_collection_items" -> verb "update", object "CMS items".
+// Calls whose names don't read as what they do.
+const PHRASES: Record<string, { verb: string; object: string }> = {
+  get_more_tools: { verb: "send", object: "a description of this task to Webflow's team" },
+};
+
 export function actionWords(name: string): { verb: string; object: string; noun?: string } {
+  if (PHRASES[name]) return PHRASES[name];
   const [tool, action] = name.split(".");
   const area = words(tool).filter((w) => w !== "data" && w !== "tool").join("_");
   if (!action) return { verb: "use", object: phrase(words(area)) };

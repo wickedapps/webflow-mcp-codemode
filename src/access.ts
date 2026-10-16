@@ -26,6 +26,9 @@ export const OVERRIDES: Record<string, Access> = {
   "data_members_tool.list_site_members": "sensitive",
   "data_members_tool.list_workspace_members": "sensitive",
 
+  // Sends a free-text description of the task to Webflow's team. Nothing on the site changes, but the text leaves.
+  get_more_tools: "write",
+
   // Sends future site events, including form submissions, to any URL.
   "data_webhook_tool.create_webhook": "destructive",
   // Adds or replaces JavaScript that runs on every page after the next publish.

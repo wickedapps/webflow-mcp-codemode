@@ -5,7 +5,7 @@
 //
 // The snippet and the files it imports from its folder are bundled, then run in a QuickJS sandbox (sandbox/sandbox.ts)
 // with no network, file system, process or environment access. Its globals are `webflow`, `console`, `args`, `out`
-// (read and write files in out/) and `sleep`. This process checks each `webflow` call against the access levels
+// (read and write files in out/, and upload them for create_asset and the like; upload.ts) and `sleep`. This process checks each `webflow` call against the access levels
 // in the access table (access.ts), asks the user to approve anything above a read (confirm.ts) unless they chose to always
 // allow it (trust.ts), then forwards it with the stored credentials. out/ and types/ live in the runner's home folder (paths.ts).
 // Only the snippet's console output comes back, capped at --max-output characters; the full log goes to out/.
@@ -20,6 +20,7 @@ import { limiter, truncateMiddle } from "./limits.ts";
 import { OUT_DIR, SUPPORT_DIR, TYPES_DIR, tscPath } from "./paths.ts";
 import { APPROVAL_DAYS, isRemembered, remember, rememberable } from "./trust.ts";
 import { bundleSnippet, runSandboxed } from "./sandbox/sandbox.ts";
+import { UploadTargets } from "./upload.ts";
 
 const { values: opts, positionals } = parseArgs({
   allowPositionals: true,
@@ -153,6 +154,7 @@ if (!opts["no-check"] && tsc) {
 }
 
 const counts: Record<Access | "blocked", number> = { read: 0, sensitive: 0, write: 0, destructive: 0, blocked: 0 };
+const uploads = new UploadTargets();
 let firstCall: Promise<CallOutput> | undefined;
 // The first call gets the session ID issued; later calls reuse it, so they wait for the first one.
 function inOrder(exec: () => Promise<CallOutput>): Promise<CallOutput> {
@@ -250,6 +252,7 @@ async function handle(req: Request): Promise<unknown> {
   const output = await inOrder(() => limit(() => callOutput(mcp, req.tool, args, mcp.context, { retryRateLimit: access === "read" })));
   const { text } = output;
   const value = req.action ? unwrap(name, text) : parseMaybe(text);
+  uploads.record(name, value);
   if (!output.images.length) return value;
   // Images (element snapshots) are saved to out/ and returned as paths, which the agent can open.
   const images = output.images.map((image, i) => {
@@ -297,6 +300,11 @@ const result = await runSandboxed(
     args: positionals.slice(1),
     outDir: OUT_DIR,
     call: (tool, action, input, toolArgs) => handle({ tool, action, input, toolArgs: toolArgs as Record<string, unknown> }),
+    upload: async (file, target) => {
+      const result = await uploads.upload(file, target);
+      console.error(`[wf-mcp] Uploaded ${path.basename(file)} (${result.bytes} bytes).`);
+      return result;
+    },
     print: (text) => {
       output += `${text}\n`;
     },

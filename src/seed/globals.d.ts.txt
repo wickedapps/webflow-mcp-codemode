@@ -18,6 +18,11 @@ declare global {
     // Writes text, or other values as pretty JSON, and returns the file's full path.
     write(name: string, data: unknown): string;
     read(name: string): string;
+    // MD5 of a file's bytes as lowercase hex: the `file_hash` that create_asset, create_font and replace_font_file take.
+    md5(name: string): string;
+    // Uploads a file's bytes to finish create_asset, create_font or replace_font_file. Pass that call's result
+    // (or its { uploadUrl, uploadDetails }); only targets returned earlier in this run are accepted, each once.
+    upload(name: string, target: unknown): Promise<{ status: number; bytes: number }>;
   };
   function sleep(ms: number): Promise<void>;
 }

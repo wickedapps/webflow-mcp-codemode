@@ -59,6 +59,7 @@ test("action names read as a verb and what it changes", () => {
   expect(actionWords("data_fonts_tool.batch_delete_fonts")).toMatchObject({ verb: "delete", object: "fonts" });
   expect(actionWords("data_enterprise_tool.replace_robots_txt")).toMatchObject({ object: "robots.txt" });
   expect(actionWords("data_element_settings_tool.set_dom_id")).toMatchObject({ verb: "set", object: "element DOM ID" });
+  expect(actionWords("get_more_tools")).toMatchObject({ verb: "send" });
   expect(actionWords("data_campaigns_tool.unlink_delete_personalized_field")).toMatchObject({
     verb: "unlink and delete",
     object: "campaign personalized field",
