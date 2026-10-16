@@ -7,7 +7,7 @@ export {};
 type Page = { id: string; title: string; slug: string; publishedPath?: string; collectionId?: string; draft?: boolean; archived?: boolean };
 type Paged<K extends string, T> = { [k in K]: T[] } & { pagination?: { total: number } };
 type Collection = { id: string; displayName: string; slug: string };
-type Item = { id: string; isArchived: boolean; isDraft: boolean; lastPublished: string | null; fieldData: Record<string, unknown> & { name: string; slug: string } };
+type Item = CmsItem<Record<string, unknown> & { name: string; slug: string }>;
 
 const [siteId, pattern] = args;
 if (!siteId || !pattern) throw new Error('Usage: find-text.ts <siteId> "<regex>"');
@@ -93,9 +93,9 @@ for (const c of components) {
 // CMS: every field of every item.
 const { collections } = await webflow.data_cms_tool.get_collection_list<{ collections: Collection[] }>({ siteId });
 for (const c of collections) {
-  const items = await all("items", (offset) => webflow.data_cms_tool.list_collection_items<Paged<"items", Item>>({ collection_id: c.id, request: { limit: 100, offset } }));
+  const items = await cms.listAll<Item["fieldData"]>({ collection_id: c.id });
   for (const i of items) {
-    const state = i.isArchived ? "archived" : i.isDraft ? "draft" : i.lastPublished ? "published" : "staged";
+    const state = cms.itemState(i);
     scan(i.fieldData, "", (path, s) =>
       hits.push({ source: "cms", where: `${c.displayName} / ${i.fieldData.name} (/${c.slug}/${i.fieldData.slug})`, detail: `field ${path}`, snippet: snippetOf(s), meta: { collectionId: c.id, itemId: i.id, state } }),
     );

@@ -8,11 +8,15 @@ const result = (error: unknown) => JSON.stringify({ label: "x", action: "get_pag
 test("a structured 401 means the login was rejected", () => {
   expect(errorStatus(result({ status: 401, message: "Unauthorized" }), false)).toBe(401);
   expect(errorStatus(result({ code: "not_authorized", message: "Request not authorized" }), false)).toBe(401);
+  // How list_pages reports it: only the API client's error text, with no status or code beside it.
+  const body = JSON.stringify({ message: "Request not authorized", code: "not_authorized", details: [] }, null, 2);
+  expect(errorStatus(result({ name: "Error", message: `UnauthorizedError\nStatus code: 401\nBody: ${body}` }), false)).toBe(401);
 });
 
 test("a message that only mentions 401 does not", () => {
   expect(errorStatus(result({ status: 404, message: "Room 401 not found" }), false)).toBeUndefined();
   expect(errorStatus("Error: item 401 is missing", true)).toBeUndefined();
+  expect(errorStatus(result({ message: "NotFoundError\nStatus code: 404\nBody: page 401 not found" }), false)).toBeUndefined();
 });
 
 test("rate limits are matched by status or message", () => {

@@ -27,7 +27,7 @@ export interface Manifest {
 
 // Bump when the generated files change shape (say, what index.md shows), so existing homes are rewritten even
 // though Webflow's schemas haven't changed.
-export const TYPES_FORMAT = 2;
+export const TYPES_FORMAT = 3;
 
 // Why types/ needs writing for this tools/list result, if it does: Webflow's schemas changed, or only the way
 // this binary writes them.
@@ -85,14 +85,22 @@ function toTs(s: Schema | boolean | undefined, indent: string): string {
     .join(" | ");
 }
 
-function objectTs(s: Schema, indent: string, omit = new Set<string>()): string {
-  const props = Object.entries(s.properties ?? {}).filter(([k]) => !omit.has(k));
+// An input Webflow describes as deprecated ("Deprecated: …", "Deprecated earlier shape: …"). It's left out of the
+// types unless it's required, so a snippet that uses one fails the typecheck and moves to what replaced it: a
+// comment saying "deprecated" is easy to miss, and tsc doesn't report @deprecated.
+const deprecated = (s: Schema) => /^\s*deprecated\b/i.test(s.description ?? "");
+
+export function objectTs(s: Schema, indent: string, omit = new Set<string>()): string {
+  const required = new Set(s.required ?? []);
+  const all = Object.entries(s.properties ?? {}).filter(([k]) => !omit.has(k));
+  const props = all.filter(([k, v]) => required.has(k) || !deprecated(v));
+  // Only deprecated inputs: nothing is left to pass.
+  if (all.length && !props.length) return "Record<string, never>";
   if (!props.length) {
     return typeof s.additionalProperties === "object"
       ? `Record<string, ${toTs(s.additionalProperties, indent)}>`
       : "Record<string, unknown>";
   }
-  const required = new Set(s.required ?? []);
   const lines = props.map(
     ([k, v]) => `${jsdoc(v.description, indent + "  ")}${indent}  ${key(k)}${required.has(k) ? "" : "?"}: ${toTs(v, indent + "  ")};`,
   );

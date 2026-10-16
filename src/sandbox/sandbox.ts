@@ -1,5 +1,5 @@
 // Runs a snippet in a QuickJS WebAssembly sandbox inside the runner's process. The snippet gets only what
-// PRELUDE defines (`webflow`, `console`, `args`, `out` and `sleep`) and has no network, file system, process
+// PRELUDE defines (`webflow`, `cms`, `console`, `args`, `out` and `sleep`) and has no network, file system, process
 // or environment access of its own. Every Webflow call, file operation and upload goes through the host functions here.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -78,6 +78,59 @@ const PRELUDE = (args: string[]) => `(() => {
       get: (_t, action) => typeof action !== "string" || action === "then" ? undefined : (input, toolArgs) => call(tool, action, input, toolArgs),
     }),
   });
+  // CMS helpers; their contract is in globals.d.ts. listAll reads every page of list_collection_items (100 items
+  // each, the most it returns) and throws unless every page reports the same pagination.total and it got exactly
+  // that many distinct items. That catches most edits made while it reads, though Webflow offers no snapshot.
+  const PAGE = 100;
+  const listPage = async (collectionId, request, offset) => {
+    const page = await call("data_cms_tool", "list_collection_items", { collection_id: collectionId, request: { ...request, limit: PAGE, offset } }, undefined);
+    if (!page || !Array.isArray(page.items) || typeof page.pagination?.total !== "number" || page.items.some((i) => typeof i?.id !== "string")) {
+      throw new Error("cms.listAll: list_collection_items (" + collectionId + ", offset " + offset + ") didn't return items with IDs and a pagination.total.");
+    }
+    return page;
+  };
+  const isDate = (v) => typeof v === "string" && !Number.isNaN(Date.parse(v));
+  const isItem = (i) =>
+    typeof i?.isDraft === "boolean" && typeof i.isArchived === "boolean" && isDate(i.lastUpdated) &&
+    (i.lastPublished === null || isDate(i.lastPublished));
+  const checkItem = (i, fn) => {
+    if (!isItem(i)) throw new Error("cms." + fn + " takes a CMS item as list_collection_items returns it, with isDraft, isArchived, lastUpdated and lastPublished.");
+  };
+  const cms = {
+    listAll: async (input) => {
+      const collectionId = input?.collection_id;
+      const request = input?.request;
+      if (typeof collectionId !== "string") throw new Error("cms.listAll takes { collection_id, request? }, like list_collection_items.");
+      if (request && ("limit" in request || "offset" in request)) throw new Error("cms.listAll reads every page itself; leave out limit and offset.");
+      const first = await listPage(collectionId, request ?? {}, 0);
+      const offsets = [];
+      for (let o = PAGE; o < first.pagination.total; o += PAGE) offsets.push(o);
+      const pages = [first, ...(await Promise.all(offsets.map((o) => listPage(collectionId, request ?? {}, o))))];
+      const total = first.pagination.total;
+      const moved = pages.find((p) => p.pagination.total !== total);
+      if (moved) {
+        throw new Error("cms.listAll: " + collectionId + " had " + total + " items, then " + moved.pagination.total + " while it read. Run it again.");
+      }
+      const items = pages.flatMap((p) => p.items);
+      // With several locales, each locale's variant of an item is its own entry, so an item ID can repeat.
+      const distinct = new Set(items.map((i) => i.id + " " + (i.cmsLocaleId ?? ""))).size;
+      if (items.length !== total || distinct !== items.length) {
+        throw new Error("cms.listAll: got " + items.length + " entries (" + distinct + " distinct) of " + total + " from " + collectionId + "; items were probably added or removed while it read. Run it again.");
+      }
+      return items;
+    },
+    itemState: (item) => {
+      checkItem(item, "itemState");
+      if (item.isArchived) return "archived";
+      if (item.lastPublished === null) return item.isDraft ? "draft" : "staged";
+      if (item.isDraft) return "changes-in-draft";
+      return Date.parse(item.lastUpdated) > Date.parse(item.lastPublished) ? "changes-staged" : "published";
+    },
+    isLive: (item) => {
+      checkItem(item, "isLive");
+      return !item.isArchived && item.lastPublished !== null;
+    },
+  };
   const out = {
     write: (name, data) => host.write(String(name), typeof data === "string" ? data : JSON.stringify(data, null, 2)),
     read: (name) => host.read(String(name)),
@@ -86,6 +139,7 @@ const PRELUDE = (args: string[]) => `(() => {
   };
   const define = (name, value) => Object.defineProperty(globalThis, name, { value: Object.freeze(value) });
   define("webflow", webflow);
+  define("cms", cms);
   define("console", { log: print, info: print, warn: print, error: print, debug: print });
   define("args", JSON.parse(${JSON.stringify(JSON.stringify(args))}));
   define("out", out);

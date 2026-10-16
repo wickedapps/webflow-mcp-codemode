@@ -5,16 +5,16 @@
 // inside can't be committed by accident.
 //
 // Run on a .wf-mcp/ folder that isn't signed for this user (it came with a repo or a zip, or was moved), init
-// adopts it: any login for it in the Keychain, the approvals, the generated types and the recorded response shapes
-// are deleted first, since whoever made the folder chose them. Snippets and results are kept.
+// adopts it: any login for it in the Keychain, the approvals, the generated types, the recorded response shapes and
+// the saved site list are deleted first, since whoever made the folder chose them. Snippets and results are kept.
 import fs from "node:fs";
 import path from "node:path";
 import { forgetLogin } from "./credentials.ts";
 import { HOME_NAME, projectHomeTrusted, signProjectHome } from "./paths.ts";
 import { howToRun } from "./plugin.ts";
 
-// What adopting a folder removes: anything that can skip a prompt or describe actions.
-const UNTRUSTED = ["approvals.json", "types", "shapes.json"];
+// What adopting a folder removes: anything that can skip a prompt, describe actions or name sites.
+const UNTRUSTED = ["approvals.json", "types", "shapes.json", "sites.json"];
 
 function projectRoot(): string {
   const git = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore" });

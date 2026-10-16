@@ -4,7 +4,7 @@
 // Extra arguments reach the snippet as the global `args`.
 //
 // The snippet and the files it imports from its folder are bundled, then run in a QuickJS sandbox (sandbox/sandbox.ts)
-// with no network, file system, process or environment access. Its globals are `webflow`, `console`, `args`, `out`
+// with no network, file system, process or environment access. Its globals are `webflow`, `cms`, `console`, `args`, `out`
 // (read and write files in out/, and upload them for create_asset and the like; upload.ts) and `sleep`. This process checks each `webflow` call against the access levels
 // in the access table (access.ts), asks the user to approve anything above a read (confirm.ts) unless they chose to always
 // allow it (trust.ts), then forwards it with the stored credentials. out/ and types/ live in the runner's home folder (paths.ts).
@@ -15,6 +15,7 @@ import { parseArgs } from "node:util";
 import { ACCESS_LEVELS, parseAllow, type Access } from "./access.ts";
 import { LoginRequiredError, callOutput, connect, type WebflowMcp } from "./client.ts";
 import { confirmCall } from "./confirm.ts";
+import { forgetSites } from "./sites.ts";
 import { errorMessage } from "./errors.ts";
 import { buildManifest, diffManifests, readManifest, staleTypes, writeTypes, type Manifest } from "./gen-types.ts";
 import { RateGate, limiter, longOutputNote, truncateMiddle } from "./limits.ts";
@@ -113,8 +114,15 @@ try {
 } catch (err) {
   if (!(err instanceof LoginRequiredError)) throw err;
   console.error(err.message);
+  // The connection itself was rejected, before any site came into it, so the sites saved at login are out of date.
+  // A call rejected later may be for one site the login wasn't granted, so that leaves the saved list alone.
+  forgetSites();
   process.exit(3);
 }
+
+// Set when a call found the login rejected and couldn't log in again here (access revoked, say). The snippet sees
+// the error like any other, but the run exits with 3, so the caller knows to log in rather than fix the snippet.
+let loginNeeded = false;
 mcp.rateGate = new RateGate({ concurrency });
 
 // Regenerate types/ when Webflow's tool schemas no longer match the ones they were generated from. A run that
@@ -262,7 +270,12 @@ async function handle(req: Request): Promise<unknown> {
   // have applied part of the change already. At most --concurrency requests are out at once, fewer while Webflow is
   // rate limiting the run; a call gives up its slot while it waits out a pause or a login recovery. A call still
   // waiting when the run stops is never sent.
-  const output = await callOutput(mcp, req.tool, args, mcp.context, { resend: access === "read", signal: stopRun.signal, admit: limit });
+  const output = await callOutput(mcp, req.tool, args, mcp.context, { resend: access === "read", signal: stopRun.signal, admit: limit }).catch(
+    (err: unknown) => {
+      if (err instanceof LoginRequiredError) loginNeeded = true;
+      throw err;
+    },
+  );
   const { text } = output;
   const value = req.action ? unwrap(name, text) : parseMaybe(text);
   uploads.record(name, value);
@@ -353,7 +366,7 @@ if (output.length > maxOutput) {
 const longNote = longOutputNote(output);
 if (longNote) console.error(longNote);
 
-const exitCode = result === "stopped" ? 124 : result === "error" ? 1 : 0;
+const exitCode = loginNeeded ? 3 : result === "stopped" ? 124 : result === "error" ? 1 : 0;
 const tally = [...ACCESS_LEVELS, "blocked" as const].filter((l) => counts[l]).map((l) => `${l} ${counts[l]}`);
 const { hits } = mcp.rateGate;
 const paused = Math.round(mcp.rateGate.cooldownMs(stoppedAt) / 1000);

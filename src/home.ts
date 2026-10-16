@@ -15,7 +15,7 @@ import snapshot from "./seed/snapshot.ts.txt" with { type: "text" };
 import { EXAMPLES_DIR, HOME, OUT_DIR, SNIPPETS_DIR, SUPPORT_DIR, TYPES_DIR } from "./paths.ts";
 
 // Snippets are checked with the ES2023 library and the sandbox's globals only, so Node and Bun APIs fail.
-const COMPILER_OPTIONS = {
+export const COMPILER_OPTIONS = {
   target: "ES2023",
   lib: ["ES2023"],
   module: "esnext",

@@ -1,4 +1,4 @@
-// Log in to Webflow's MCP server in the browser and show which sites the login reaches.
+// Log in to Webflow's MCP server in the browser and show which sites the login reaches (saved for `wf-mcp snippets`).
 //   wf-mcp login            log in only if there is no working login
 //   wf-mcp login --force    replace the stored login, e.g. to switch workspaces
 // Run it in a terminal: runs started by an agent don't open the browser and ask for this instead.
@@ -8,6 +8,7 @@ import { credentialStore, forgetLogin, setAside, type Slot } from "./credentials
 import { describeRevoke, revokeLogin } from "./revoke.ts";
 import { readManifest, staleTypes, writeTypes } from "./gen-types.ts";
 import { HOME, HOME_SOURCE, TYPES_DIR } from "./paths.ts";
+import { forgetSites, refreshSites } from "./sites.ts";
 import { IN_PLUGIN } from "./plugin.ts";
 import { errorMessage } from "./errors.ts";
 
@@ -25,18 +26,20 @@ const NEXT_STEPS = [
 ].join("\n");
 
 export async function login(force: boolean): Promise<void> {
+  // The saved site list may belong to the login being replaced; if anything below fails, better none than that.
+  forgetSites();
   const store = credentialStore();
   if (force && setAside(store)) console.error("Kept the old login as the previous one, in case this login doesn't finish.");
   let inBrowser = false;
   const mcp = await connect({ name: "wf-mcp", login: true, store, onLogin: (phase) => {
     if (phase === "start") inBrowser = true;
   } });
-  const text = await callText(mcp, "data_sites_tool", { actions: [{ label: "sites", list_sites: {} }] });
-  const { result } = JSON.parse(text) as { result?: { sites: Array<{ id: string; displayName: string }> } };
+  const sites = await refreshSites(async () => JSON.parse(await callText(mcp, "data_sites_tool", { actions: [{ label: "sites", list_sites: {} }] })));
   const scope = HOME_SOURCE === "project" ? "this project" : HOME_SOURCE === "global" ? "every project without its own .wf-mcp/" : "$WF_MCP_HOME";
   console.log(`Logged in for ${HOME} (used by ${scope}). The login is in ${store.where}.`);
   console.log("Sites this login reaches:");
-  for (const s of result?.sites ?? []) console.log(`  ${s.id}  ${s.displayName}`);
+  for (const s of sites ?? []) console.log(`  ${s.id}  ${s.displayName}`);
+  if (!sites) console.error("Couldn't read the site list from Webflow's reply.");
   // The login --force replaced is no longer needed as a fallback: revoke it, so authorizations don't pile up.
   const previous = force ? store.get("previous") : undefined;
   if (previous !== undefined && previous !== store.get()) {
@@ -71,6 +74,7 @@ export async function logout(): Promise<void> {
     }
   }
   forgetLogin();
+  forgetSites();
   if (!results.length) console.log(`No Webflow login was stored for ${HOME}.`);
   else console.log([`Deleted the Webflow login for ${HOME}.`, ...results].join("\n"));
 }

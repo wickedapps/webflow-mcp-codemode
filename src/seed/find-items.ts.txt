@@ -31,25 +31,17 @@ function condition(op: Op, raw: string): Condition {
   return c;
 }
 
-type Item = { id: string; isDraft?: boolean; isArchived?: boolean; fieldData: { name?: string; slug?: string } };
-type Page = { items: Item[]; pagination?: { total?: number } };
+type Item = CmsItem<{ name: string; slug: string }>;
 
-// Every item matching the filter, a page of 100 at a time.
-async function findAll(collection_id: string, filter: Filter): Promise<Item[]> {
-  const items: Item[] = [];
-  for (let offset = 0; ; offset += 100) {
-    const page = await webflow.data_cms_tool.list_collection_items<Page>({ collection_id, request: { filter, limit: 100, offset } });
-    items.push(...page.items);
-    if (page.items.length < 100 || items.length >= (page.pagination?.total ?? 0)) return items;
-  }
-}
+// Every item matching the filter: cms.listAll reads all the pages and checks it got them all.
+const findAll = (collection_id: string, filter: Filter) => cms.listAll<Item["fieldData"]>({ collection_id, request: { filter } });
 
-const status = (i: Item) => (i.isArchived ? "archived" : i.isDraft ? "draft" : "live");
-const row = (i: Item) => ({ id: i.id, name: i.fieldData.name ?? "", slug: i.fieldData.slug ?? "", status: status(i) });
+// cms.itemState tells a draft that's still live ("changes-in-draft") from one that was never published ("draft").
+const row = (i: Item) => ({ id: i.id, name: i.fieldData.name, slug: i.fieldData.slug, state: cms.itemState(i) });
 
 const matches = await findAll(collectionId, { [field]: condition(opArg, value) });
 console.log(`${matches.length} item(s) where ${field} ${opArg} ${value}`);
-for (const i of matches.slice(0, 20)) console.log(`  ${i.id}  ${i.fieldData.name ?? ""} (${status(i)})`);
+for (const i of matches.slice(0, 20)) console.log(`  ${i.id}  ${i.fieldData.name} (${cms.itemState(i)})`);
 if (matches.length > 20) console.log(`  … and ${matches.length - 20} more`);
 
 const referencing: Item[] = [];
@@ -60,8 +52,11 @@ if (otherCollectionId && referenceField && matches.length) {
     referencing.push(...(await findAll(otherCollectionId, { [referenceField]: { in: ids.slice(i, i + 50) } })));
   }
   console.log(`\n${referencing.length} item(s) in ${otherCollectionId} whose ${referenceField} references one of them`);
-  const counts = new Map<string, number>();
-  for (const r of referencing) counts.set(status(r), (counts.get(status(r)) ?? 0) + 1);
+  const counts = new Map<CmsItemState, number>();
+  for (const r of referencing) {
+    const state = cms.itemState(r);
+    counts.set(state, (counts.get(state) ?? 0) + 1);
+  }
   console.log(`  ${[...counts].map(([s, n]) => `${n} ${s}`).join(", ")}`);
 }
 

@@ -87,7 +87,8 @@ The built binary and compiler aren't committed. Claude Code installs the zip att
 cd src
 bun install
 bun dev login            # log in to ~/.wf-mcp (or a signed WF_MCP_HOME), writes types/
-bun test                 # access table, Keychain store, 401/429 handling, output limits, response shapes, approval prompt
+bun test                 # access table, Keychain store, 401/429 handling, output limits, response shapes, approval prompt,
+                         # sandbox CMS helpers, snippet typecheck, saved site list
 bun run build            # typecheck, compile the binary into plugins/webflow-codemode/scripts/, write the zip
 bun run audit:ages       # check that every locked package is at least 24 hours old
 ```
@@ -104,14 +105,16 @@ bun run audit:ages       # check that every locked package is at least 24 hours 
 
 ### How it works
 
-- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `types`, `snippets`, `approvals` and `home`. `types <tool>.<action>` prints one action's docs from `types/` (`src/type-docs.ts`), so Claude doesn't read a whole tool's file, plus the key names and types the action returned in earlier runs, recorded in the home's `shapes.json` (`src/shapes.ts`), since Webflow publishes no output schemas; `snippets` lists saved snippets and examples with their header comments (`src/snippets.ts`).
+- A single `wf-mcp` command with the subcommands `init`, `login`, `logout`, `run`, `gen`, `types`, `snippets`, `approvals` and `home`. `types <tool>.<action>` prints one action's docs from `types/` (`src/type-docs.ts`), so Claude doesn't read a whole tool's file, plus the key names and types the action returned in earlier runs, recorded in the home's `shapes.json` (`src/shapes.ts`), since Webflow publishes no output schemas; `snippets` lists the sites the last login reached, then saved snippets and examples with their header comments (`src/snippets.ts`, `src/sites.ts`).
 - The login lives in the macOS Keychain: a generic password with service `wf-mcp` and the home's path as the account, plus `<path>#previous` for the login before it (`src/credentials.ts`). It's written through `security -i` on stdin so tokens never show in a process list.
-- Other state lives in a home folder (`approvals.json`, `shapes.json`, `types/`, `snippets/`, `out/`, `support/`): a project's own `.wf-mcp/` if it has one, else `~/.wf-mcp/` (`src/paths.ts`).
+- Other state lives in a home folder (`approvals.json`, `shapes.json`, `sites.json`, `types/`, `snippets/`, `out/`, `support/`): a project's own `.wf-mcp/` if it has one, else `~/.wf-mcp/` (`src/paths.ts`).
 - Each call's access level comes from the access table compiled into the binary (`buildManifest` in `src/gen-types.ts`), never from `types/manifest.json` on disk.
 - Any home other than `~/.wf-mcp/` is used only if `init` signed it: an HMAC of its path, keyed by `~/.wf-mcp/.project-key` (`src/paths.ts`). That includes a folder named by `$WF_MCP_HOME`, since a repo's `.claude/settings.json` or `.envrc` can set it. Other folders make every command exit with code 5; `WF_MCP_HOME=<dir> wf-mcp init` signs one.
 - `logout` and `login --force` revoke the login they discard at Webflow's revocation endpoint, then try its refresh token once to confirm it's dead (`src/revoke.ts`).
 - Write and sensitive actions can be always allowed per action and site for 7 days (`src/trust.ts`); destructive ones can't. An agent with shell access could edit `approvals.json`, or read the Keychain item with `security` (items it created don't prompt), so the dialog stops mistakes, not a determined agent.
 - Snippets have no network. To finish `create_asset`, `create_font` or `replace_font_file`, a snippet hands the runner a file in `out/` and that call's presigned S3 target (`out.upload`); the runner sends it only to a target one of those calls returned in the same run, and only to Amazon S3 over https (`src/upload.ts`).
+- Besides `webflow`, snippets get a `cms` global: `cms.listAll` reads every page of a collection and throws if items change mid-read, and `cms.itemState` and `cms.isLive` read an item's state from `lastPublished`, since an item that was published and then saved as a draft has `isDraft: true` but is still live (`src/sandbox/sandbox.ts`).
+- Inputs Webflow's schemas describe as deprecated are left out of the generated types, so a snippet using one fails the typecheck (`src/gen-types.ts`).
 - The QuickJS wasm, the sandbox globals and the example snippets are embedded in the binary. The examples are rewritten into `snippets/examples/` on every run; the rest of `snippets/` is never touched (`src/home.ts`). The TypeScript compiler ships beside it, and without the compiler snippets run unchecked.
 - The access table is compiled in. When Webflow adds actions, their levels are guessed from the action names (writes and destructive calls still need approval). Review them with `bun dev gen`, add any needed overrides to `src/access.ts`, then rebuild.
 - The launcher refuses anything but an Apple silicon Mac. The first time it runs after an install or update, it checks that macOS lets the binary start (restoring the executable bits if unzipping dropped them), and records the check in `scripts/.checked`. It sets `WF_MCP_PLUGIN=1`, so the binary's messages name slash commands like `/webflow-codemode:login` instead of `wf-mcp login`, which plugin users don't have on their PATH (`src/plugin.ts`).

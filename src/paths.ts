@@ -65,6 +65,8 @@ export const TYPES_DIR = path.join(HOME, "types");
 // whenever Webflow's schemas change.
 export const SHAPES_FILE = path.join(HOME, "shapes.json");
 export const OUT_DIR = path.join(HOME, "out");
+// The sites the last login reached (sites.ts).
+export const SITES_FILE = path.join(HOME, "sites.json");
 export const SNIPPETS_DIR = path.join(HOME, "snippets");
 // The plugin's example snippets, rewritten to match the binary (home.ts). The rest of snippets/ is the user's.
 export const EXAMPLES_DIR = path.join(SNIPPETS_DIR, "examples");

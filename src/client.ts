@@ -471,8 +471,12 @@ async function attempt(
 
 // 401 or 429 from a failed call. Data API failures come back inside a successful result, e.g.
 // {error: {status: 401, code: "not_authorized"}} or {error: {message: "GET /v2/pages returned 429"}}.
-// A 401 counts only when it is a structured status or code: a message that merely mentions "401" must not
-// set off a new login. A rate limit may be matched in the message, since a wrong match only costs a retry.
+// A 401 counts only when it is a structured status or code, or the message is the API client's own
+// "UnauthorizedError\nStatus code: 401" (some tools, such as list_pages, send only that): a message that merely
+// mentions "401" must not set off a new login. A rate limit may be matched in the message, since a wrong match
+// only costs a retry.
+const API_CLIENT_401 = /^UnauthorizedError\s*\n\s*Status code: 401\b/;
+
 export function errorStatus(text: string, isError: boolean): 401 | 429 | undefined {
   let error: { status?: number; code?: string; message?: string } | undefined;
   if (isError) error = { message: text };
@@ -485,7 +489,7 @@ export function errorStatus(text: string, isError: boolean): 401 | 429 | undefin
   }
   if (!error) return;
   const detail = `${error.code ?? ""} ${error.message ?? ""}`;
-  if (error.status === 401 || error.code === "not_authorized") return 401;
+  if (error.status === 401 || error.code === "not_authorized" || API_CLIENT_401.test(error.message ?? "")) return 401;
   if (error.status === 429 || /\b429\b|too_many_requests|rate limit/i.test(detail)) return 429;
   return undefined;
 }
