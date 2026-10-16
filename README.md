@@ -73,13 +73,13 @@ plugins/webflow-codemode/
   skills/code/SKILL.md               the workflow Claude follows (/webflow-codemode:code)
   skills/{setup,login,logout,approvals,status}/SKILL.md   slash commands, user-only (disable-model-invocation)
   scripts/wf-mcp                     launcher: checks the Mac, then starts the binary
-  scripts/wf-mcp-darwin-arm64        compiled runner (built, committed)
-  scripts/typescript-darwin-arm64/   native TypeScript compiler used to typecheck snippets (copied, committed)
-plugins/webflow-codemode.zip         the plugin, zipped (built, not committed)
+  scripts/wf-mcp-darwin-arm64        compiled runner (built, not committed)
+  scripts/typescript-darwin-arm64/   native TypeScript compiler used to typecheck snippets (copied, not committed)
+plugins/webflow-codemode.zip         the plugin, zipped (built, attached to each GitHub release)
 .claude-plugin/marketplace.json
 ```
 
-The built binary and compiler are committed, because Claude Code installs the plugin straight from this repository.
+The built binary and compiler aren't committed. Claude Code installs the zip attached to each GitHub release, which `.claude-plugin/marketplace.json` names by URL and SHA-256.
 
 ### Build and test
 
@@ -99,8 +99,8 @@ bun run audit:ages       # check that every locked package is at least 24 hours 
 ### Releasing
 
 1. Bump `version` in `plugins/webflow-codemode/.claude-plugin/plugin.json` and `VERSION` in `src/cli.ts`. The build stops if they differ. Installed copies are cached by version, so users only get changes after a bump.
-2. Run `bun run build` and commit the rebuilt files in `plugins/webflow-codemode/scripts/`.
-3. Tag the commit (`v1.0.0`) and optionally attach `plugins/webflow-codemode.zip` to a GitHub release, for anyone who installs from a zip.
+2. Run `bun run build`. It writes `plugins/webflow-codemode.zip` and points the marketplace entry at the `v<version>` release, with the zip's SHA-256. Commit `.claude-plugin/marketplace.json`, after any other change that goes into the zip, so the hash matches the zip you publish.
+3. Push, tag the commit `v<version>`, and publish a GitHub release for the tag with `plugins/webflow-codemode.zip` attached. Until the release exists, installs from the marketplace fail.
 
 ### How it works
 
