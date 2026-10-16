@@ -146,7 +146,10 @@ function waitForCode(port: number): Promise<string> {
     const server = http
       .createServer((req, res) => {
         const u = new URL(req.url ?? "/", `http://localhost:${port}`);
-        if (u.pathname !== "/callback") return res.end();
+        if (u.pathname !== "/callback") {
+          res.end();
+          return;
+        }
         const code = u.searchParams.get("code");
         const error = u.searchParams.get("error");
         res.end(code ? "Authorized. You can close this tab." : `Error: ${error}`);
@@ -317,7 +320,7 @@ export async function callOutput(
     if (result !== RATE_LIMITED) return result;
     if (!retryRateLimit) throw new Error(`${name}: ${RATE_LIMITED_WRITE}`);
     if (waits === RATE_LIMIT_DELAYS.length) throw new Error(`${name}: Webflow is still rate limiting after ${waits} retries.`);
-    const delay = RATE_LIMIT_DELAYS[waits++];
+    const delay = RATE_LIMIT_DELAYS[waits++] ?? 0;
     console.error(`[webflow-mcp] ${name} was rate limited (429); retrying in ${delay}s.`);
     await new Promise((r) => setTimeout(r, delay * 1000));
   }
@@ -356,8 +359,8 @@ async function attempt(
   const parts = content.filter((c) => c.type === "text").map((c) => c.text ?? "");
   const notice = parts.findIndex((p) => p.startsWith("[session_id issued"));
   if (notice >= 0) {
-    const issued = parts[notice].match(/session_id: (ses_[0-9A-Za-z]{27})/);
-    if (issued) mcp.sessionId = issued[1];
+    const issued = parts[notice]?.match(/session_id: (ses_[0-9A-Za-z]{27})/)?.[1];
+    if (issued) mcp.sessionId = issued;
     parts.splice(notice, 1);
   }
   const text = parts.join("");
@@ -386,6 +389,7 @@ export function errorStatus(text: string, isError: boolean): 401 | 429 | undefin
   const detail = `${error.code ?? ""} ${error.message ?? ""}`;
   if (error.status === 401 || error.code === "not_authorized") return 401;
   if (error.status === 429 || /\b429\b|too_many_requests|rate limit/i.test(detail)) return 429;
+  return undefined;
 }
 
 // Call an action-style tool and return the parsed action result.

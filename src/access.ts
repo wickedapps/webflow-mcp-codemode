@@ -90,14 +90,16 @@ export function toolAccess(tool: string, readOnlyHint: boolean | undefined): Acc
   return OVERRIDES[tool] ?? (readOnlyHint ? "read" : "write");
 }
 
+const isAccess = (value: string): value is Access => (ACCESS_LEVELS as string[]).includes(value);
+
 // The levels a run may use, from --allow. Reads are always allowed; destructive implies write.
 export function parseAllow(value: string): Set<Access> {
   const allowed = new Set<Access>(["read"]);
   for (const part of value.split(",").map((p) => p.trim()).filter(Boolean)) {
-    if (!ACCESS_LEVELS.includes(part as Access)) {
+    if (!isAccess(part)) {
       throw new Error(`--allow takes a comma-separated list of: ${ACCESS_LEVELS.join(", ")} (got "${part}")`);
     }
-    allowed.add(part as Access);
+    allowed.add(part);
     if (part === "destructive") allowed.add("write");
   }
   return allowed;

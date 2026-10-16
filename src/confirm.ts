@@ -64,13 +64,13 @@ const PHRASES: Record<string, { verb: string; object: string }> = {
 
 export function actionWords(name: string): { verb: string; object: string; noun?: string } {
   if (PHRASES[name]) return PHRASES[name];
-  const [tool, action] = name.split(".");
+  const [tool = "", action] = name.split(".");
   const area = words(tool).filter((w) => w !== "data" && w !== "tool").join("_");
   if (!action) return { verb: "use", object: phrase(words(area)) };
   let ws = words(action);
   if (ws[0] === "bulk" || ws[0] === "batch") ws = ws.slice(1);
   if (ws[0] === "unlink" && ws[1] === "delete") ws = ["unlink and delete", ...ws.slice(2)];
-  const [verb, ...rest] = ws;
+  const [verb = action, ...rest] = ws;
   let object = rest;
   // CMS actions say "collection" before what they change: collection items are CMS items.
   if (area === "cms" && object[0] === "collection" && object.length > 1) object = object.slice(1);
@@ -93,6 +93,7 @@ export function changeCount(input: unknown, noun: string | undefined): number | 
       const n = search(v, depth + 1);
       if (n !== undefined) return n;
     }
+    return undefined;
   };
   return search(input, 0);
 }

@@ -42,7 +42,7 @@ type Schema = {
 };
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
-const pascal = (name: string) => name.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+const pascal = (name: string) => name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("");
 const key = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
 
 function jsdoc(text: string | undefined, indent: string): string {
@@ -92,9 +92,9 @@ function actionVariants(tool: Tool): Array<[string, Schema]> | undefined {
   const variants = items.anyOf ?? [items];
   const out: Array<[string, Schema]> = [];
   for (const v of variants) {
-    const keys = Object.keys(v.properties ?? {}).filter((k) => k !== "label");
-    if (keys.length !== 1) return;
-    out.push([keys[0], v.properties![keys[0]]]);
+    const entries = Object.entries(v.properties ?? {}).filter(([k]) => k !== "label");
+    if (entries.length !== 1) return;
+    out.push(entries[0]!);
   }
   return out;
 }
@@ -119,7 +119,7 @@ function toolFile(tool: Tool): { source: string; entry: ToolEntry } {
   const toolArgs = Object.keys(schema.properties ?? {}).filter((k) => k !== "actions" && !SESSION_ARGS.has(k));
   const toolArgsRequired = toolArgs.some((k) => schema.required?.includes(k));
   const toolArgsTs = toolArgs.length
-    ? objectTs({ properties: Object.fromEntries(toolArgs.map((k) => [k, schema.properties![k]])), required: schema.required }, "  ")
+    ? objectTs({ properties: Object.fromEntries(Object.entries(schema.properties ?? {}).filter(([k]) => toolArgs.includes(k))), required: schema.required }, "  ")
     : "";
   const actions: Record<string, Access> = {};
   const guessed: string[] = [];
@@ -148,7 +148,8 @@ function catalog(tools: Tool[], manifest: Manifest): string {
   ];
   for (const tool of tools) {
     const entry = manifest.tools[tool.name];
-    const first = (tool.description ?? "").split("\n")[0];
+    if (!entry) continue;
+    const first = (tool.description ?? "").split("\n")[0] ?? "";
     const summary = first.length > 200 ? `${first.slice(0, first.lastIndexOf(" ", 200))}…` : first;
     lines.push("", `## ${tool.name}`, summary);
     if (entry.kind === "call") {

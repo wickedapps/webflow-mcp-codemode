@@ -15,6 +15,7 @@ import { parseArgs } from "node:util";
 import { ACCESS_LEVELS, parseAllow, type Access } from "./access.ts";
 import { LoginRequiredError, callOutput, connect, type CallOutput, type WebflowMcp } from "./client.ts";
 import { confirmCall } from "./confirm.ts";
+import { errorMessage } from "./errors.ts";
 import { buildManifest, diffManifests, readManifest, schemaHash, writeTypes, type Manifest } from "./gen-types.ts";
 import { limiter, truncateMiddle } from "./limits.ts";
 import { OUT_DIR, SUPPORT_DIR, TYPES_DIR, tscPath } from "./paths.ts";
@@ -38,19 +39,20 @@ const { values: opts, positionals } = parseArgs({
     concurrency: { type: "string", default: "4" },
   },
 });
-const fail = (message: string): never => {
+function fail(message: string): never {
   console.error(message);
   process.exit(2);
-};
+}
 
-if (!positionals[0]) fail("Usage: wf-mcp run <snippet.ts> [args...] [--allow sensitive,write,destructive]");
-if (!fs.existsSync(positionals[0])) fail(`No such snippet: ${positionals[0]}`);
-const snippet = fs.realpathSync(positionals[0]);
+const [snippetArg] = positionals;
+if (!snippetArg) fail("Usage: wf-mcp run <snippet.ts> [args...] [--allow sensitive,write,destructive]");
+if (!fs.existsSync(snippetArg)) fail(`No such snippet: ${snippetArg}`);
+const snippet = fs.realpathSync(snippetArg);
 let allowed = new Set<Access>();
 try {
   allowed = parseAllow(opts.allow!);
 } catch (err) {
-  fail((err as Error).message);
+  fail(errorMessage(err));
 }
 const maxOutput = Number(opts["max-output"]);
 const limit = limiter(Math.max(1, Number(opts.concurrency) || 1));
@@ -60,7 +62,7 @@ let code = "";
 try {
   code = await bundleSnippet(snippet);
 } catch (err) {
-  fail(`Could not bundle ${positionals[0]}:\n${(err as Error).message}`);
+  fail(`Could not bundle ${snippetArg}:\n${errorMessage(err)}`);
 }
 
 // The snippet's timeout. It stops while the user logs in again after a 401, then restarts in full. The timer

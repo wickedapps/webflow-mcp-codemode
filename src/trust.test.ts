@@ -51,3 +51,13 @@ test("kept approvals expire after APPROVAL_DAYS", () => {
   remember("stale.x", undefined, "write");
   expect(isRemembered("stale.x", undefined, "write")).toBe(true);
 });
+
+test("a damaged approvals file means asking again, not a failed run", () => {
+  fs.writeFileSync(APPROVALS_FILE, "{not json");
+  expect(listApprovals()).toEqual([]);
+  fs.writeFileSync(APPROVALS_FILE, JSON.stringify({ name: "x" }));
+  expect(listApprovals()).toEqual([]);
+  const since = new Date().toISOString();
+  fs.writeFileSync(APPROVALS_FILE, JSON.stringify([{ name: "a", site: "s", access: "write", since }, { name: "b", site: 1 }]));
+  expect(listApprovals().map((a) => a.name)).toEqual(["a"]);
+});

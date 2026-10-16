@@ -23,9 +23,23 @@ const current = (a: Approval, now = Date.now()) => Date.parse(a.since) + APPROVA
 
 export const rememberable = (access: Access) => access === "write" || access === "sensitive";
 
-// Expired approvals are dropped as they're read, and from the file the next time it's written.
-const load = (): Approval[] =>
-  fs.existsSync(APPROVALS_FILE) ? (JSON.parse(fs.readFileSync(APPROVALS_FILE, "utf8")) as Approval[]).filter((a) => current(a)) : [];
+const isApproval = (v: unknown): v is Approval =>
+  !!v &&
+  typeof v === "object" &&
+  ["name", "site", "access", "since"].every((k) => typeof (v as Record<string, unknown>)[k] === "string");
+
+// Expired and malformed approvals are dropped as they're read, and from the file the next time it's written, so a
+// damaged file means being asked again rather than a failed run.
+function load(): Approval[] {
+  if (!fs.existsSync(APPROVALS_FILE)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(APPROVALS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+  return Array.isArray(parsed) ? parsed.filter(isApproval).filter((a) => current(a)) : [];
+}
 const save = (list: Approval[]) => fs.writeFileSync(APPROVALS_FILE, JSON.stringify(list, null, 2) + "\n", { mode: 0o600 });
 
 // Kept approvals only cover the access level they were given at: if an action's level goes up in a later

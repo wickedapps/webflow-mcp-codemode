@@ -20,10 +20,13 @@ export function actionDoc(source: string, action: string): string | undefined {
   if (lines[at - 1]?.startsWith("  /**")) start = at - 1;
   else if (lines[at - 1]?.trim() === "*/") {
     start = at - 1;
-    while (start > 0 && !lines[start].startsWith("  /**")) start--;
+    while (start > 0 && !lines[start]?.startsWith("  /**")) start--;
   }
   let end = at + 1;
-  while (end < lines.length && !MEMBER_START.test(lines[end]) && !lines[end].startsWith("}")) end++;
+  for (; end < lines.length; end++) {
+    const line = lines[end] ?? "";
+    if (MEMBER_START.test(line) || line.startsWith("}")) break;
+  }
   return lines.slice(start, end).join("\n").trimEnd();
 }
 
@@ -33,7 +36,7 @@ export function actionNames(source: string): string[] {
 
 // What `wf-mcp types <name>` prints, or an error message.
 export function describeType(name: string): { ok: boolean; text: string } {
-  const [tool, action] = name.split(".");
+  const [tool = "", action] = name.split(".");
   const file = path.join(TYPES_DIR, `${tool}.ts`);
   if (!/^\w+$/.test(tool) || !fs.existsSync(file)) return { ok: false, text: `No tool ${tool}. See ${path.join(TYPES_DIR, "index.md")}.` };
   const source = fs.readFileSync(file, "utf8");

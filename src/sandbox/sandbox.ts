@@ -7,6 +7,7 @@ import path from "node:path";
 import type { BunPlugin } from "bun";
 import wasmFile from "@jitl/quickjs-wasmfile-release-sync/wasm" with { type: "file" };
 import { RELEASE_SYNC, newQuickJSWASMModuleFromVariant, newVariant, type QuickJSHandle } from "quickjs-emscripten";
+import { errorMessage } from "../errors.ts";
 
 export interface SandboxHost {
   args: string[];
@@ -52,7 +53,9 @@ export async function bundleSnippet(entry: string): Promise<string> {
   };
   const result = await Bun.build({ entrypoints: [real(entry)], target: "browser", format: "esm", plugins: [guard], throw: false });
   if (!result.success) throw new Error(result.logs.map((l) => l.message).join("\n"));
-  return result.outputs[0].text();
+  const [bundle] = result.outputs;
+  if (!bundle) throw new Error("Bundling produced no output.");
+  return bundle.text();
 }
 
 // Guest-side setup. Takes the host functions off the global object and defines the snippet's globals.
@@ -140,7 +143,7 @@ export async function runSandboxed(code: string, host: SandboxHost, abort: Abort
       fn(...params)
         .then(
           (value) => settle(vm.newString(value), true),
-          (err) => settle(vm.newError(err instanceof Error ? err.message : String(err)), false),
+          (err) => settle(vm.newError(errorMessage(err)), false),
         )
         .finally(() => {
           if (tracked && --inflight === 0) onIdle?.();

@@ -15,11 +15,11 @@ const server = Bun.serve({
     const form = Object.fromEntries(new URLSearchParams(await req.text()));
     requests.push({ path: url.pathname, ...form });
     if (url.pathname === "/oauth/revoke") {
-      if (!ignoreRevocation) revoked.add(form.token);
+      if (!ignoreRevocation) revoked.add(form.token ?? "");
       return new Response(null, { status: 200 });
     }
     if (url.pathname === "/oauth/token") {
-      if (revoked.has(form.refresh_token)) return Response.json({ error: "invalid_grant" }, { status: 400 });
+      if (revoked.has(form.refresh_token ?? "")) return Response.json({ error: "invalid_grant" }, { status: 400 });
       return Response.json({ access_token: "new-access", refresh_token: "new-refresh" });
     }
     return new Response(null, { status: 404 });

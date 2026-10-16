@@ -9,6 +9,7 @@ import { describeRevoke, revokeLogin } from "./revoke.ts";
 import { readManifest, schemaHash, writeTypes } from "./gen-types.ts";
 import { HOME, HOME_SOURCE, TYPES_DIR } from "./paths.ts";
 import { IN_PLUGIN } from "./plugin.ts";
+import { errorMessage } from "./errors.ts";
 
 // Printed after a login made in the browser, so a first-time user knows what to expect before it happens.
 const NEXT_STEPS = [
@@ -42,7 +43,7 @@ export async function login(force: boolean): Promise<void> {
     try {
       console.log(`The replaced login: ${describeRevoke(await revokeLogin(previous))}.`);
     } catch (err) {
-      console.error(`Couldn't revoke the replaced login at Webflow (${(err as Error).message}); remove it in Webflow's workspace settings.`);
+      console.error(`Couldn't revoke the replaced login at Webflow (${errorMessage(err)}); remove it in Webflow's workspace settings.`);
     }
     store.remove("previous");
   }
@@ -60,13 +61,13 @@ export async function login(force: boolean): Promise<void> {
 export async function logout(): Promise<void> {
   const store = credentialStore();
   const results: string[] = [];
-  for (const slot of ["current", "previous"] as Slot[]) {
+  for (const slot of ["current", "previous"] satisfies Slot[]) {
     const text = store.get(slot);
     if (text === undefined) continue;
     try {
       results.push(`${slot === "current" ? "Login" : "Previous login"}: ${describeRevoke(await revokeLogin(text))}.`);
     } catch (err) {
-      results.push(`${slot === "current" ? "Login" : "Previous login"}: couldn't reach Webflow to revoke it (${(err as Error).message}); remove the app in Webflow's workspace settings.`);
+      results.push(`${slot === "current" ? "Login" : "Previous login"}: couldn't reach Webflow to revoke it (${errorMessage(err)}); remove the app in Webflow's workspace settings.`);
     }
   }
   forgetLogin();

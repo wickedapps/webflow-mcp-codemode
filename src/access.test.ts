@@ -47,5 +47,5 @@ test("run-time access levels come from the access table, not a manifest on disk"
     ] } } } },
   };
   const entry = buildManifest([tool]).tools.data_x_tool;
-  expect(entry.kind === "actions" && entry.actions).toEqual({ delete_thing: "destructive", list_things: "read" });
+  expect(entry?.kind === "actions" && entry.actions).toEqual({ delete_thing: "destructive", list_things: "read" });
 });
