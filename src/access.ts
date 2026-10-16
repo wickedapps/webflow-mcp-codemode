@@ -23,6 +23,8 @@ export const OVERRIDES: Record<string, Access> = {
   "data_enterprise_tool.list_site_activity_logs": "sensitive",
   "data_campaigns_tool.get_engaged_accounts": "sensitive",
   "data_campaigns_tool.get_opportunity_summary": "sensitive",
+  "data_members_tool.list_site_members": "sensitive",
+  "data_members_tool.list_workspace_members": "sensitive",
 
   // Sends future site events, including form submissions, to any URL.
   "data_webhook_tool.create_webhook": "destructive",
@@ -45,6 +47,14 @@ export const OVERRIDES: Record<string, Access> = {
   "data_sitemap_tool.bulk_update_items_sitemap_status": "destructive",
   "data_sitemap_tool.bulk_update_pages_sitemap_status": "destructive",
   "data_campaigns_tool.bulk_update_page_variations": "destructive",
+  // Who can see and edit the site or workspace. Granting a role can give someone admin or site manager access,
+  // and revokes take effect at once and can't be undone through the API.
+  "data_members_tool.grant_site_access": "destructive",
+  "data_members_tool.revoke_site_access": "destructive",
+  "data_members_tool.update_site_role": "destructive",
+  "data_members_tool.invite_workspace_member": "destructive",
+  "data_members_tool.update_workspace_role": "destructive",
+  "data_members_tool.bulk_update_workspace_roles": "destructive",
   // Replaces each asset's file in place; the original isn't kept.
   "data_assets_tool.compress_assets": "destructive",
 
