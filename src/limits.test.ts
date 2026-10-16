@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { limiter, truncateMiddle } from "./limits.ts";
+import { limiter, longOutputNote, truncateMiddle } from "./limits.ts";
 
 test("truncateMiddle keeps the start and the end", () => {
   const text = "a".repeat(100) + "END";
@@ -36,4 +36,11 @@ test("limiter frees the slot when a task throws", async () => {
   const limit = limiter(1);
   await expect(limit(async () => Promise.reject(new Error("no")))).rejects.toThrow("no");
   expect(await limit(async () => "next")).toBe("next");
+});
+
+test("longOutputNote flags runs that print a lot", () => {
+  expect(longOutputNote("short\n")).toBeUndefined();
+  const rows = Array.from({ length: 300 }, (_, i) => `item ${i}\tsome-slug-${i}\tpublished`).join("\n");
+  expect(longOutputNote(rows)).toContain("(300 lines)");
+  expect(longOutputNote(rows)).toContain("out.write()");
 });

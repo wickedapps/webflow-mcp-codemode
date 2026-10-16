@@ -31,3 +31,16 @@ export function limiter(max: number) {
     }
   };
 }
+
+// Output above this many characters gets a note: everything a snippet prints comes back into the conversation.
+export const LONG_OUTPUT = 6000;
+
+// The note for a run that printed a lot, or undefined. Full lists belong in out/, with a summary printed.
+export function longOutputNote(output: string): string | undefined {
+  if (output.length <= LONG_OUTPUT) return undefined;
+  const lines = output.split("\n").filter(Boolean).length;
+  return (
+    `[wf-mcp] This run printed ${output.length.toLocaleString("en-US")} characters (${lines} lines), and everything printed comes back ` +
+    "into the conversation. Print counts and a few examples instead, and write full lists with out.write()."
+  );
+}

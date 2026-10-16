@@ -17,7 +17,7 @@ import { LoginRequiredError, callOutput, connect, type CallOutput, type WebflowM
 import { confirmCall } from "./confirm.ts";
 import { errorMessage } from "./errors.ts";
 import { buildManifest, diffManifests, readManifest, staleTypes, writeTypes, type Manifest } from "./gen-types.ts";
-import { limiter, truncateMiddle } from "./limits.ts";
+import { limiter, longOutputNote, truncateMiddle } from "./limits.ts";
 import { OUT_DIR, SUPPORT_DIR, TYPES_DIR, tscPath } from "./paths.ts";
 import { APPROVAL_DAYS, isRemembered, remember, rememberable } from "./trust.ts";
 import { bundleSnippet, runSandboxed } from "./sandbox/sandbox.ts";
@@ -331,6 +331,8 @@ if (output.length > maxOutput) {
     `[wf-mcp] … ${omitted} of ${output.length} characters omitted here. Full log: ${log}`;
   process.stdout.write(truncateMiddle(output, maxOutput, note));
 } else process.stdout.write(output);
+const longNote = longOutputNote(output);
+if (longNote) console.error(longNote);
 
 const exitCode = result === "stopped" ? 124 : result === "error" ? 1 : 0;
 const tally = [...ACCESS_LEVELS, "blocked" as const].filter((l) => counts[l]).map((l) => `${l} ${counts[l]}`);
